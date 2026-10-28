@@ -4,7 +4,7 @@ The proposal is the design authority. Values it leaves unspecified are implement
 
 | Requirement | Implementation | Validation or remaining evidence |
 |---|---|---|
-| Paper 1 world, 20 objects, 6 locations, 2 characters, depth up to 2 | `data/_vendor`, `data/world.py`, `data/provenance.py` | Original oracle retained; first-order parity audit; depth-two view extension documented |
+| Paper 1 world, 20 objects, 6 locations, 2 characters, depth up to 2 | `data/_vendor`, `data/world.py`, `data/provenance.py` | Paper 1’s world, new nine-event story distribution with relation quotas; original oracle retained; scores not directly comparable with Paper 1’s panel |
 | 2000 train / 120 dev / 120 confirmation stories | `data/corpus.py` | Disjoint family/world/story hashes; immutable generated manifest |
 | Direct-belief training, seven unrewarded consequences | `training/data.py`, separate training/supervision exports | Reject held-out splits, non-direct views, world state and unintended trace supervision |
 | 90% shortcut twin with agree/independent/conflict test renders | `data/corpus.py` | Same worlds; exact entity and character counts; tokenizer audit; independent six and conflict five balanced variants |
@@ -23,7 +23,7 @@ The proposal is the design authority. Values it leaves unspecified are implement
 | Within-model primary, cross-model secondary | `ComponentInterventionEngine.swap` | Cross-model prefix identity enforced; explicit secondary CLI donor; identical full inputs and answer alphabets; excluded from primary analysis |
 | OpenToM external check | `opentom.py` | Pinned flat QA schema, question-type options and scoring; documented prompt adaptation and upstream diagnostics |
 | Profiling and compute reporting | `training/ledger.py`, `training/runner.py` | Actual counters/timers and manifests; practical GPU timings pending |
-| G0–G4 and paid-run review | `gates.py`, `docs/PROTOCOL.md` | All gates initially pending; schema-v3 stratified shortcut audit required before G0; evidence hashes checked |
+| G0–G4 and paid-run review | `gates.py`, `docs/PROTOCOL.md` | All gates initially pending; schema-v3/audit-v4 screens and explicit remaining-heuristic review before G0; evidence hashes checked |
 | Conditional Bridge follow-on | No Bridge experiment implemented | Separate proposal and its decision rule required; no calendar-triggered launch |
 
 The proposal's figure gives four **candidate readings** (trace-dependent gain; transfer still sensitive to traces; narrow gain; trace-independent transfer). The implementation reports the two measurements and their controls; it does not automatically label a quadrant as a discovered mechanism.
@@ -37,3 +37,7 @@ The proposal's figure gives four **candidate readings** (trace-dependent gain; t
 - Test 3 layers must be supplied explicitly. The proposal does not specify layers; choose and freeze them during implementation/profiling, before looking at confirmatory outcomes.
 - Semantic/paraphrase controls require content review. Automatic string substitution cannot establish that a free-form model trace changed only one fact; the edit manifest records offsets, exact old/new text, the fact and predictions, and a reviewer. Basic crossed runs can run before this review, but cannot satisfy G3.
 - Numerical pilot thresholds are not invented as proposal requirements. Record the intended effect/precision criteria during calibration and have the named gate reviewer judge the measured evidence.
+
+## Deliberate departures
+
+See [the manuscript disclosure record](PROPOSAL_DEPARTURES.md) for the changed story distribution, remaining weak heuristics, precision-sized confirmatory edits, oracle-premise control, evaluation-cost reduction, optimization differences and adapted OpenToM scoring. These are changes to disclose, not claims that the original proposal specified them.

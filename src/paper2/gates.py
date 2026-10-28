@@ -27,6 +27,36 @@ def verify_evidence(gate, root):
             raise ValueError(f"Gate evidence missing or modified: {item['path']}")
 
 
+def verify_g4_positive_control(gate, root):
+    """Bind G4 to measured, nontrivial residual evidence, never a layer-0 replay.
+
+    A named reviewer still judges flat nulls, preservation and useful precision.
+    This check rejects missing, structurally ineligible or nonpositive evidence;
+    it does not declare G4 passed automatically from the architecture or code.
+    """
+    from .interventions.controls import residual_control_summary
+    from .io import read_jsonl
+    selected = gate.get("positive_control", {})
+    required = ("path", "sha256", "mask_id", "checkpoint_id")
+    if not all(isinstance(selected.get(key), str) and selected[key] for key in required):
+        raise ValueError("G4 requires a selected nontrivial residual positive-control evidence file, mask and checkpoint")
+    path = Path(root) / selected["path"]
+    if not path.is_file() or file_digest(path) != selected["sha256"]:
+        raise ValueError("G4 positive-control evidence missing or modified")
+    if not any((Path(root) / item["path"]).resolve() == path.resolve() and item["sha256"] == selected["sha256"]
+               for item in gate.get("evidence", [])):
+        raise ValueError("G4 positive-control file must be included in the reviewed evidence")
+    rows = [row for row in read_jsonl(path) if row.get("mask_id") == selected["mask_id"]
+            and row.get("checkpoint_id") == selected["checkpoint_id"]]
+    candidates = residual_control_summary(rows)["candidates"]
+    if len(candidates) != 1 or not candidates[0]["eligible"]:
+        raise ValueError("G4 requires eligible residual evidence excluding layer zero and retaining downstream attention")
+    effect = candidates[0]["effects"].get("natural|changed_accuracy", {})
+    if effect.get("estimate") is None or effect["estimate"] <= 0:
+        raise ValueError("G4 residual positive control did not improve changed-view consequence accuracy over own replay")
+    return candidates[0]
+
+
 def assert_training_allowed(config_dict, gate_file, profile_report):
     stage = config_dict.get("stage", "pilot")
     if stage not in ("profile", "pilot", "confirmatory"):
@@ -50,7 +80,9 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if profile.get("synthetic") is not False:
         raise ValueError("A synthetic or unspecified profile cannot authorize real-model training")
     measured = ("generation_seconds", "update_seconds", "checkpoint_seconds", "peak_cuda_memory_bytes",
-                "generated_tokens", "sampled_completions", "generation_tokens_per_second", "truncation_rate")
+                "generated_tokens", "sampled_completions", "generation_tokens_per_second", "truncation_rate",
+                "evaluation_seconds", "evaluation_panels", "evaluation_native_generations",
+                "evaluation_generated_tokens", "max_evaluated_adapter_bytes")
     for field in measured:
         value = profile.get(field)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
@@ -58,11 +90,15 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if any(profile[field] <= 0 for field in ("generation_seconds", "update_seconds", "generated_tokens",
                                             "sampled_completions", "generation_tokens_per_second")):
         raise ValueError("Profiling must measure actual generation and an optimization update")
+    if any(profile[field] <= 0 for field in ("evaluation_seconds", "evaluation_panels",
+                   "evaluation_native_generations", "evaluation_generated_tokens", "max_evaluated_adapter_bytes")):
+        raise ValueError("Profiling must measure native development evaluation and retained-adapter storage")
     if not 0 <= profile["truncation_rate"] <= 1:
         raise ValueError("Profiling truncation rate must be between zero and one")
     if paid_required:
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
+        verify_g4_positive_control(review["gates"]["G4"], path.parent)
         paid = review.get("paid_compute", {})
         if not paid.get("approved") or not paid.get("approved_by"):
             raise ValueError("Paid 7B runs require the proposal's explicit cost approval after gate review")
@@ -89,7 +125,7 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
     if review["calibration"]["frozen"]:
         raise ValueError("Calibration is already frozen; use a new preregistered experiment lineage")
     from .data import assert_calibration_corpus
-    assert_calibration_corpus(manifest)
+    assert_calibration_corpus(manifest, acknowledged_heuristic_risks=_heuristic_risk_review(manifest, settings))
     review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest),
                              "manifest_path": str(Path(manifest).resolve()), "settings": settings}
     review["gates"]["G0"] = {"status": "pass", "reviewed_by": reviewer, "rationale": rationale,
@@ -106,4 +142,19 @@ def validate_calibration_manifest(calibration):
         raise ValueError("G0 requires a current audited corpus manifest path; recalibrate old lineages")
     if file_digest(manifest) != calibration.get("manifest_sha256"):
         raise ValueError("G0 corpus manifest was modified after calibration")
-    return assert_calibration_corpus(manifest)
+    return assert_calibration_corpus(manifest, acknowledged_heuristic_risks=
+                                     _heuristic_risk_review(manifest, calibration.get("settings", {})))
+
+
+def _heuristic_risk_review(manifest, settings):
+    """Known weak heuristics need a corpus-bound decision, never an implicit pass."""
+    acknowledgement = settings.get("residual_heuristic_review")
+    if acknowledgement is None:
+        return False
+    corpus_hash = json.loads(Path(manifest).read_text()).get("corpus_hash")
+    if (not isinstance(acknowledgement, dict) or acknowledgement.get("accepted") is not True
+            or not corpus_hash or acknowledgement.get("corpus_hash") != corpus_hash
+            or not isinstance(acknowledgement.get("rationale"), str)
+            or not acknowledgement["rationale"].strip()):
+        raise ValueError("G0 residual heuristic review requires accepted=true, the current corpus_hash and a rationale")
+    return True

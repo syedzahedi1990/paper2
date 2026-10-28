@@ -48,10 +48,11 @@ def _validate_source_trace(trace):
 
 
 def symbolic_belief_summary(row):
-    """An automatic base-state control, without answer labels or final answers.
+    """An oracle-premise positive control, not a model-produced summary.
 
     The same state description is supplied across all consequence views. Oracle
-    predictions are stored as metadata only; they are never part of the prompt.
+    predictions are stored as metadata only. The state prose nevertheless
+    directly supplies the relevant location for many evaluated questions.
     """
     from .data.world import StoryWorld, VIEWS, CONFIG, answer_label, ordinary_target
     if "world" not in row:
@@ -153,7 +154,38 @@ def collect_traces(backend, rows, source, timing="question_dependent"):
         yield trace
 
 
-def prepare_edit_manifest(traces, rows=None, *, max_worlds=12, seed=2026):
+def symbolic_edit_prediction(row, value=None):
+    """Propose a focal-belief edit and compute all eight consequences.
+
+    The reviewer still locates and checks the actual trace span. This helper
+    never asserts that a free-form trace expresses only the proposed fact.
+    """
+    from .data.world import StoryWorld, VIEWS, answer_label, ordinary_target, rewrite_forecast
+    world = StoryWorld.from_dict(row["world"])
+    before = ordinary_target(world, "direct")
+    value = row["scope_edit_location"] if value is None else value
+    if value == before:
+        raise ValueError("Symbolic edit must change the focal belief")
+    subject = " believes that ".join(world.focal_word)
+    premise = f"{subject} believes the {world.focal_object} is in the "
+    return {"fact_before": premise + before, "fact_after": premise + value,
+            "expected_answers": {view: answer_label(rewrite_forecast(world, view, value, "belief_edit"))
+                                 for view in VIEWS},
+            "oracle": {"method": "focal_belief_edit_v1", "world_sha256": digest(row["world"]),
+                       "word": list(world.focal_word), "object": world.focal_object,
+                       "before": before, "after": value}}
+
+
+def _validate_oracle_edit(row, contract):
+    semantic = contract["semantic"]
+    oracle = semantic.get("oracle")
+    if oracle is not None:
+        expected = symbolic_edit_prediction(row, oracle.get("after"))
+        if any(semantic.get(key) != value for key, value in expected.items()):
+            raise ValueError("Semantic edit differs from its symbolic fact or oracle consequences")
+
+
+def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stage="pilot", half_width=.10):
     """Freeze a deterministic world subset before reviewing model outputs.
 
     Selection uses only world IDs and the preregistered seed, not correctness,
@@ -161,13 +193,29 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=12, seed=2026):
     contract for all their consequence projections.
     """
     traces = list(traces)
-    if type(max_worlds) is not int or max_worlds < 1 or type(seed) is not int or seed < 0:
-        raise ValueError("Edit subset requires positive max_worlds and a nonnegative integer seed")
+    if type(seed) is not int or seed < 0:
+        raise ValueError("Edit subset requires a nonnegative integer seed")
     records = {row["id"]: row for row in rows or ()}
     universe = sorted({trace["world_id"] for trace in traces})
+    from .precision import edit_precision_plan
+    precision = edit_precision_plan(len(universe), stage=stage, max_worlds=max_worlds, half_width=half_width)
+    if stage == "confirmatory" and set(universe) != {row["world_id"] for row in records.values()}:
+        raise ValueError("Confirmatory edit planning needs traces covering the complete evaluation world pool")
+    if stage == "confirmatory":
+        from .data.world import VIEWS
+        panels, sources = {}, {}
+        for row in records.values():
+            panels.setdefault(_story_key(row), set()).add(row["view"])
+        for trace in traces:
+            source_key = (trace["source"], digest(trace["source_checkpoint"]), trace.get("training_seed"))
+            sources.setdefault(source_key, set()).add(trace["record_id"])
+        if any(views != set(VIEWS) for views in panels.values()) or any(
+                record_ids != set(records) for record_ids in sources.values()):
+            raise ValueError("Confirmatory edits require complete eight-view panels for every source and world")
+    max_worlds = precision["selected_worlds"]
     selected = sorted(sorted(universe, key=lambda world: digest([seed, world]))[:max_worlds])
     selection = {"method": "sha256_seeded_world_rank_v1", "seed": seed, "max_worlds": max_worlds,
-                 "universe_world_ids": universe, "selected_world_ids": selected}
+                 "universe_world_ids": universe, "selected_world_ids": selected, "precision": precision}
     entries = {}
     for trace in traces:
         _validate_source_trace(trace)
@@ -183,6 +231,7 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=12, seed=2026):
         summary = trace.get("belief_summary")
         if not summary and trace["record_id"] in records:
             summary = symbolic_belief_summary(records[trace["record_id"]])
+        prediction = symbolic_edit_prediction(records[trace["record_id"]]) if trace["record_id"] in records else {}
         entries[key] = {"artifact_id": key, "trace_ids": [trace["trace_id"]],
                        "record_ids": [trace["record_id"]], "world_id": trace["world_id"],
                        "source": trace["source"], "source_checkpoint": trace.get("source_checkpoint"),
@@ -191,7 +240,7 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=12, seed=2026):
                        "paraphrase": {"text": None, "meaning_preserved": False},
                        "semantic": {"start": None, "end": None, "old": None, "new": None,
                                     "fact_before": None, "fact_after": None, "expected_answers": {},
-                                    "only_intended_fact_changed": False},
+                                    "only_intended_fact_changed": False, **prediction},
                        "irrelevant": {"start": None, "end": None, "old": None, "new": None,
                                       "irrelevant_to_answers": False},
                        "belief_summary": summary}
@@ -251,6 +300,13 @@ def _contracts(edits):
                              key=lambda world: digest([selection["seed"], world]))[:selection["max_worlds"]])
     if expected != selection["selected_world_ids"]:
         raise ValueError("Edit subset differs from its preregistered deterministic selection")
+    if "precision" in selection:
+        from .precision import edit_precision_plan
+        plan = selection["precision"]
+        expected_plan = edit_precision_plan(len(selection["universe_world_ids"]), stage=plan["stage"],
+                        max_worlds=selection["max_worlds"], half_width=plan["target_half_width"])
+        if plan != expected_plan:
+            raise ValueError("Edit precision plan was altered")
     result = {}
     for contract in edits["edits"]:
         if contract["artifact_id"] in result:
@@ -288,6 +344,7 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
         basis = records.get(trace.get("basis_record_id", trace["record_id"]))
         if basis is None:
             raise ValueError("Regeneration requires the original source question record")
+        _validate_oracle_edit(basis, contract)
         native_prompt = render_prompt(backend.tokenizer, basis, reasoning=True)
         if native_prompt != trace.get("generation_prompt"):
             raise ValueError("Regeneration source prompt changed from the frozen trace artifact")
@@ -362,6 +419,7 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
             if contract is None:
                 raise ValueError(f"Missing edit contract for selected artifact {artifact_id}")
             validate_edit(trace, contract)
+            _validate_oracle_edit(row, contract)
         for condition in conditions:
             if condition in EDIT_CONTROLS and not selected:
                 continue
@@ -412,6 +470,7 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                              artifact_id=artifact_id, source_trace_sha256=trace["trace_sha256"],
                              edit_subset_sha256=edits["selection_sha256"] if selected else None,
                              edit_subset_selected=selected,
+                             edit_precision_plan=selection.get("precision") if selected else None,
                              expected_edited_answer=expected if condition in EDIT_CONTROLS else None,
                              expected_summary_answer=expected if summary else None,
                              follows_edit=(answer.prediction == expected) if condition in EDIT_CONTROLS and expected else None,

@@ -14,11 +14,11 @@ H3 asks whether training changes the contribution of critical-token keys, values
 
 | Gate | Evidence to review | Response if unsuccessful |
 |---|---|---|
-| G0 | Schema-v3 stratified shortcut audit (both equality and disagreement), base development accuracy, failure types, chosen difficulty and frozen corpus | Recalibrate once before training |
+| G0 | Schema-v3/audit-v4 stratified controls, explicit corpus-bound review of remaining position/frequency/joint-observation heuristics, base development accuracy, failure types, chosen difficulty and frozen corpus | Recalibrate once before training |
 | G1 | Clean reasoning-RL native-format learning curve versus native base, alongside immediate transfer curve; improvement and stable optimization | Diagnose format/task/optimization; increase model size only for a blocking capability/optimization limit after cost approval |
 | G2 | Exact 90% training cue, matched entities/lengths, tokenizer audit, independent and conflicting renders | Regenerate and re-audit |
-| G3 | Raw and re-rendered own-trace replay; source-frozen continuations; preregistered subset of reviewed edits; paraphrase and irrelevant behavior | Repair replay/editing; resistance to a contradictory fact is itself a possible result |
-| G4 | Verified simultaneous layer masks; residual positive effect on changed/intact/joint patterns, flat nulls, useful precision | Repair implementation or increase story count |
+| G3 | Raw and re-rendered own-trace replay; source-frozen continuations; pilot diagnostic or precision-sized confirmatory subset of reviewed edits; actual story intervals; paraphrase and irrelevant behavior | Repair replay/editing; resistance to a contradictory fact is itself a possible result |
+| G4 | Verified simultaneous layer masks; hashed interior-residual evidence excluding layer zero and final-only masks; measured changed/intact/joint effects, flat nulls, useful precision | Repair implementation or increase story count |
 
 Before paid 7B training, fill `paid_compute` with the approved profiling-based estimate, approver, exchange-rate date and budget no greater than £500. Retain the actual approval evidence. The code refuses incomplete reviews, modified evidence and missing cost information. It does not make purchases.
 
@@ -35,3 +35,7 @@ Before paid 7B training, fill `paid_compute` with the approved profiling-based e
 | Writing and internal review | 29 March–2 May 2027 |
 
 These are the supplied plan's dates, not scheduled automations. The proposal's preliminary dollar estimates are preserved in the source document. Obtain measured throughput and current purchase-day rates before committing compute. Cut optional analyses and layer searches before cutting the three confirmatory seeds.
+
+## Disclosures and resource limits
+
+[Proposal departures](PROPOSAL_DEPARTURES.md) records the new story distribution, weak heuristics, oracle-premise control, adapted OpenToM evaluation and unmatched optimization settings. These must be stated in the paper. The 12-world edit subset is only a pilot diagnostic; confirmatory rate planning and observed story precision are separate requirements. The revised RL schedule reduces evaluation from 81 to nine panels, but does not establish the proposal’s whole-pilot budget.

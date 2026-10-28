@@ -23,6 +23,11 @@ is balanced across the six answer labels; other event locations and the
 initial location are independent draws, except for the final depth-two private
 observations that realize the declared relation quotas below. First-event, last-event and
 initial-location lookup therefore have a one-sixth population success rate.
+That claim is limited to those three rules: interior event positions and
+location-frequency rules remain informative, as measured below. This is
+**Paper 1's world, new story distribution**. The eight-view scores are not
+directly comparable to Paper 1's eight-question panel, despite sharing its
+state engine and first-order view roles.
 At depth two, the final private observations separately update the two
 characters, in randomized order, to locations realizing the independent
 six-label **joint relation quotas**. Before any world is generated, each
@@ -87,7 +92,7 @@ across world IDs. This is an ex-ante design constraint, not outcome-driven
 resampling. All eight views and both sides of each Test 3 pair reuse the same
 literal clean cue and inventory order. Corpus verification recomputes the
 assignment and checks the exact per-cell agreement quota. The shortcut audit
-version is v3; older unbalanced cue audits cannot authorize G0.
+version is v4; older audits cannot authorize G0.
 
 Held-out cue conditions refer to the **rewarded direct-belief target of the
 underlying world**, not to each later consequence answer. The inventory order is
@@ -138,11 +143,12 @@ the depth mixture, irrelevant-event count and an optional hidden move;
 calibration must not consult confirmation stories. Re-running generation into a
 directory containing a manifest is refused. `verify_corpus` validates file
 hashes, row counts, story splits, direct-only training contracts and the entire
-recomputed shortcut audit. The corpus/world schema is v3; v2 manifests are
-rejected and must be regenerated and recalibrated.
+recomputed shortcut audit. The corpus/world schema remains v3 because this
+review does not alter story sampling. Audit v4 changes the recorded screening
+results and corpus hash: old manifests must be regenerated and recalibrated.
 
 `audit_shortcuts` reports each split separately and each depth × decisive-event
-kind separately. It screens first-event, last-event, initial-location and clean
+kind separately. Its required controls screen first-event, last-event, initial-location and clean
 cue rules against one-sixth; planted cue conditions retain their intended
 90%/100%/0% rates. For depth two it reports equality with either own belief,
 equality with both, and disagreement with both, plus the expected answer
@@ -154,7 +160,7 @@ accuracy null. Thus both an always-equal generator and an always-different
 generator fail the audit, without imposing the opposite shortcut.
 
 The manifest stores every score, sample size and explicit simultaneous
-Hoeffding screening threshold (familywise alpha 0.01 over 52 comparisons).
+Hoeffding screening threshold (familywise alpha 0.01 over 52 required-control comparisons).
 The per-character equality and different-from-both relations must also exhibit
 both outcomes in every sufficiently populated depth-two cell, even when a
 small-sample concentration bound alone would admit a deterministic relation.
@@ -175,3 +181,43 @@ corpus files and recomputes the audit before G0, rather than trusting a manually
 edited pass flag. Default training has about 500 worlds per stratum; the
 120-world held-out sets have 30, so their finite-sample bounds are explicitly
 wider. A failure is not repaired by looking at confirmation model results.
+
+Audit v4 additionally measures every existing **focal-object event position**,
+numbered from one, including positions outside the six possible deciding slots.
+If a position is absent in a variable-length story, its preregistered fallback
+is the focal object's initial location; such cases remain in the denominator
+and their counts are reported. Three frequency rules take the modal location
+over (1) focal-object events, (2) those events plus its initial location, and
+(3) all objects' initial locations and all story events. The inventory appendix
+adds one occurrence of every location, so cannot change the third rule's mode.
+All frequency ties score the exact accuracy of uniform choice among tied
+locations; they are never resolved using the answer. The audit also evaluates
+the last focal-object event seen by both characters, with initial location as
+its fallback. This is a shortcut at depth one. At depth two it is exactly the
+inherited engine's correct update rule, so its accuracy is reported separately
+as a **semantic baseline**, not compared against a chance null.
+
+These new rules expose remaining weak heuristics. On the default 2,000 training
+worlds, fixed positions 2–7 score 27.7–33.5% within depth/event-kind cells; the
+focal-event mode scores 33.5–38.2%; and last-both-observed scores 56.5–58.0% at
+depth one. Chance is 16.7%. Depth-two last-both-observed scores 100%, as the
+state rule predicts. The audit preserves the story distribution and reports
+these limitations; it does not reroll stories until the new rules pass.
+All scores, tie/fallback counts and failures appear in each stratum's
+`residual_heuristics` section. These screens use a separate fixed family of
+four strata × (all observed positions + four additional rules), with a minimum
+of 52 comparisons; the required controls' thresholds are unchanged. Screening
+on a small held-out cell can miss a heuristic that is detectable in training,
+so a held-out pass is not evidence that the rule lacks predictive information.
+
+The default corpus therefore has `required_controls_passed: true`,
+`requires_heuristic_review: true`, and `calibration_ready: false`.
+Top-level audit `passed` and `all_shortcuts_near_chance` remain false. G0 must
+explicitly accept and disclose the measured remaining heuristics, using a
+named review with a rationale bound to the current corpus hash. Acknowledgement
+does not rewrite the failed screen or waive missing strata, insufficient
+sample sizes, the original required controls, exact quotas, or file integrity.
+The paper must state that rewarded accuracy can improve through these weak
+heuristics; the unrewarded consequence and intervention results must establish
+the claimed belief-tracking change. This review is a prerequisite for empirical
+calibration, not evidence that G0 or any other empirical gate has passed.

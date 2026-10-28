@@ -112,3 +112,18 @@ def test_recomputed_text_hash_does_not_silently_change_frozen_artifact_identity(
     trace["trace_sha256"] = digest(trace["trace"])
     with pytest.raises(ValueError, match="artifact identity changed"):
         list(run_crossed_reader(SummaryReader(), [row], [trace], "trained", conditions=("original",)))
+
+
+def test_confirmatory_manifest_freezes_precision_and_requires_full_view_panels():
+    # A wider declared bound keeps this test small; the production .10 default needs 97 worlds.
+    worlds = [generate_world(random.Random(seed)) for seed in range(10)]
+    pairs = [trace_record(world, view) for world in worlds for view in VIEWS]
+    rows, traces = zip(*pairs)
+    manifest = prepare_edit_manifest(traces, rows, stage="confirmatory", half_width=.4)
+    assert manifest["selection"]["precision"]["required_worlds"] == 7
+    assert len(manifest["edits"]) == 7
+    assert all(edit["semantic"]["oracle"]["method"] == "focal_belief_edit_v1" for edit in manifest["edits"])
+    _contracts(manifest)
+    with pytest.raises(ValueError, match="complete eight-view"):
+        prepare_edit_manifest([t for t in traces if t["view"] == "direct"],
+                              [r for r in rows if r["view"] == "direct"], stage="confirmatory", half_width=.4)

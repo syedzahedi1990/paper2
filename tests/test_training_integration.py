@@ -85,6 +85,15 @@ def test_real_trl_optimizer_and_saved_adapter(tmp_path, arm):
         assert compute['generation_seconds'] > 0
         assert compute['prompt_exposures'] == 2
         assert compute['unique_worlds_seen'] == 2
+        assert compute['completed_optimizer_steps'] == 2
+        assert compute['evaluation_panels'] == 3
+        assert compute['evaluation_native_generations'] == 6
+        assert compute['evaluation_immediate_forward_calls'] == 6
+        assert compute['evaluation_generated_tokens'] > 0
+        assert compute['evaluated_adapter_save_count'] == 3
+        assert compute['max_evaluated_adapter_bytes'] > 0
+        assert compute['resumable_checkpoint_save_count'] == 1
+        assert compute['final_adapter_save_seconds'] > 0
         metrics = [json.loads(line) for line in (tmp_path / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
         assert len(metrics) == 6
         assert {row['step'] for row in metrics} == {0, 1, 2}
@@ -218,3 +227,22 @@ def test_one_epoch_grpo_budget_actually_visits_every_training_world(tmp_path):
     assert report['compute']['sampled_completions'] == 64
     assert report['compute']['unique_worlds_seen'] == 8
     assert report['compute']['training_pool_coverage'] == 1
+
+
+def test_profile_evaluates_off_interval_final_and_records_resource_projection(tmp_path):
+    from paper2.training.config import TrainingConfig
+    from paper2.training.runner import run_training
+    model, tok = tiny_fixture()
+    config = TrainingConfig(arm='answer_rl', stage='profile', model='paper2-random-tiny-qwen',
+                            max_steps=3, eval_steps=2, save_steps=2, bf16=False,
+                            gradient_checkpointing=False, lora_rank=2, lora_alpha=4, beta=0.0)
+    dev = [{**rows()[0], 'id': 'dev', 'world_id': 'dev', 'split': 'development'}]
+    result = run_training(config, rows(), tmp_path, dev_rows=dev, synthetic_model=model, synthetic_tokenizer=tok)
+    metrics = [json.loads(line) for line in (tmp_path / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
+    assert {row['step'] for row in metrics} == {0, 2, 3}
+    assert result['compute']['evaluation_panels'] == 3
+    assert result['manifest']['resource_plan']['evaluation_steps'] == [0, 2, 3]
+    report = json.loads((tmp_path / 'profile_report.json').read_text())
+    assert report['synthetic'] is True and report['gpu_seconds'] == 0
+    assert report['full_pool_resource_projection']['projected_total_seconds'] > 0
+    assert report['full_pool_resource_projection']['projected_evaluated_adapter_bytes'] > 0

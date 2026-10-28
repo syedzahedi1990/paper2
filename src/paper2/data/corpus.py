@@ -248,6 +248,8 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
     manifest = {"schema_version": CORPUS_SCHEMA, "config": asdict(config),
                 "shortcut_audit": shortcut_audit,
                 "calibration_ready": all(audit["passed"] for audit in shortcut_audit.values()),
+                "required_controls_passed": all(audit["required_controls_passed"] for audit in shortcut_audit.values()),
+                "requires_heuristic_review": any(audit["requires_heuristic_review"] for audit in shortcut_audit.values()),
                 "depth_two_relation_design": {"weights_out_of_36": RELATION_WEIGHTS,
                                                "allocation": "Largest remainder, separately in every split and decisive-event kind",
                                                "assignment": "Quota labels shuffled before world generation; no outcome-based rejection sampling"},
@@ -282,6 +284,8 @@ def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
     manifest = json.loads((output / "manifest.json").read_text())
     if manifest.get("schema_version") != CORPUS_SCHEMA:
         raise ValueError("Obsolete corpus schema; regenerate v3 data and recalibrate G0")
+    if any(audit.get("audit_version") != AUDIT_VERSION for audit in manifest.get("shortcut_audit", {}).values()):
+        raise ValueError("Obsolete shortcut audit; regenerate with audit v4 and recalibrate G0")
     expected_hash = digest({"schema_version": CORPUS_SCHEMA, "config": manifest["config"],
                             "files": manifest["files"], "shortcut_audit": manifest["shortcut_audit"]})
     if manifest.get("corpus_hash") != expected_hash:
@@ -319,18 +323,32 @@ def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
     calibration_ready = all(result["passed"] for result in shortcut_audit.values())
     if manifest.get("calibration_ready") != calibration_ready:
         raise ValueError("Frozen calibration readiness changed")
+    required_controls_passed = all(result["required_controls_passed"] for result in shortcut_audit.values())
+    requires_heuristic_review = any(result["requires_heuristic_review"] for result in shortcut_audit.values())
+    if (manifest.get("required_controls_passed") != required_controls_passed or
+            manifest.get("requires_heuristic_review") != requires_heuristic_review):
+        raise ValueError("Frozen shortcut-control or heuristic-review status changed")
     return {"verified": True, "files": len(manifest["files"]), "corpus_hash": manifest["corpus_hash"],
-            "calibration_ready": calibration_ready, "shortcut_audit": shortcut_audit, **audit}
+            "calibration_ready": calibration_ready, "required_controls_passed": required_controls_passed,
+            "requires_heuristic_review": requires_heuristic_review, "shortcut_audit": shortcut_audit, **audit}
 
 
-def assert_calibration_corpus(output_dir: str | Path) -> dict[str, Any]:
-    """Recheck bytes and symbolic audits; a small smoke corpus cannot pass G0."""
+def assert_calibration_corpus(output_dir: str | Path, *,
+                              acknowledged_heuristic_risks: bool = False) -> dict[str, Any]:
+    """Recheck bytes and controls; only reviewed residual risks may be accepted.
+
+    The gates module binds a named review and rationale to this corpus hash
+    before setting the acknowledgement flag. It never changes the manifest's
+    measured failure or `calibration_ready` status.
+    """
     output = Path(output_dir)
     result = verify_corpus(output.parent if output.name == "manifest.json" else output)
-    if not result["calibration_ready"]:
-        raise ValueError("G0 requires passing stratified shortcut audits with sufficient stories in every cell")
+    if not result["required_controls_passed"]:
+        raise ValueError("G0 requires passing required stratified shortcut audits with sufficient stories in every cell")
     if any(audit["audit_version"] != AUDIT_VERSION for audit in result["shortcut_audit"].values()):
         raise ValueError("Obsolete shortcut audit; regenerate and recalibrate G0")
+    if result["requires_heuristic_review"] and acknowledged_heuristic_risks is not True:
+        raise ValueError("G0 requires explicit corpus-bound review of remaining position/frequency/observation heuristics")
     return result
 
 

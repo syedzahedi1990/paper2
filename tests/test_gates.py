@@ -11,6 +11,7 @@ def reviewed(tmp_path, monkeypatch):
     # These unit cases isolate cost/profile/evidence policy. Real corpus readiness
     # and stale approvals have dedicated tests below and in test_data_corpus.
     monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda _: None)
+    monkeypatch.setattr("paper2.gates.verify_g4_positive_control", lambda *_: None)
     evidence = tmp_path / "evidence.json"
     write_json(evidence, {"measured": True})
     review = initial_review()
@@ -24,7 +25,9 @@ def reviewed(tmp_path, monkeypatch):
     write_json(gate, review)
     profile = {"status": "completed", "synthetic": False, "generation_seconds": 2, "update_seconds": 1,
                "checkpoint_seconds": .1, "peak_cuda_memory_bytes": 1000, "generated_tokens": 16,
-               "sampled_completions": 8, "generation_tokens_per_second": 8, "truncation_rate": 0}
+               "sampled_completions": 8, "generation_tokens_per_second": 8, "truncation_rate": 0,
+               "evaluation_seconds": 2, "evaluation_panels": 2, "evaluation_native_generations": 240,
+               "evaluation_generated_tokens": 240, "max_evaluated_adapter_bytes": 1000}
     report = tmp_path / "profile.json"
     write_json(report, profile)
     return gate, report, review, profile
@@ -80,10 +83,32 @@ def test_freeze_requires_named_review_before_writing(tmp_path):
     assert not (tmp_path / "gates.json").exists()
 
 
+def test_old_profile_cannot_omit_development_costs_or_snapshot_storage(reviewed):
+    gate, report, _, profile = reviewed
+    profile.pop("evaluation_seconds")
+    write_json(report, profile)
+    with pytest.raises(ValueError, match="evaluation_seconds"):
+        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+    profile["evaluation_seconds"] = 2
+    profile["max_evaluated_adapter_bytes"] = 0
+    write_json(report, profile)
+    with pytest.raises(ValueError, match="retained-adapter storage"):
+        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+
+
 def test_old_frozen_lineage_cannot_authorize_training(tmp_path):
     from paper2.gates import validate_calibration_manifest
     with pytest.raises(ValueError, match="current audited"):
         validate_calibration_manifest({"frozen": True, "manifest_sha256": "0" * 64})
+
+
+def test_paid_gate_enforces_nontrivial_residual_review(reviewed, monkeypatch):
+    gate, report, _, _ = reviewed
+    def reject(*_):
+        raise ValueError("G4 rejects layer-zero-only positive-control evidence")
+    monkeypatch.setattr("paper2.gates.verify_g4_positive_control", reject)
+    with pytest.raises(ValueError, match="G4 rejects layer-zero"):
+        assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
 
 
 def test_g0_rejects_smoke_corpus_even_with_named_reviewer(tmp_path):

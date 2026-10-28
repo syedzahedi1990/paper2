@@ -91,6 +91,8 @@ def parser():
             selection.add_argument("--all-layers", action="store_true", help="Simultaneous full-depth mask for this model")
             run.add_argument("--seed", type=int, default=1)
             run.add_argument("--layer-mode", choices=["joint", "single", "both"], default="joint")
+            run.add_argument("--residual-control-layers", type=int, nargs="+",
+                             help="Separate preregistered residual band, excluding layer 0, for G4")
             run.add_argument("--donor-model", help="Explicit secondary cross-model analysis on identical input tokens")
             run.add_argument("--donor-adapter")
             run.add_argument("--donor-revision")
@@ -98,7 +100,10 @@ def parser():
     edits.add_argument("--traces", nargs="+", required=True)
     edits.add_argument("--output", required=True)
     edits.add_argument("--input", required=True, help="Evaluation rows with symbolic worlds")
-    edits.add_argument("--max-worlds", type=int, default=12)
+    edits.add_argument("--max-worlds", type=int, help="Pilot defaults to 12; confirmatory defaults to precision requirement")
+    edits.add_argument("--stage", choices=["pilot", "confirmatory"], default="pilot")
+    edits.add_argument("--precision-half-width", type=float, default=.10,
+                       help="Preregistered 95%% per-arm story-rate interval target; default .10")
     edits.add_argument("--seed", type=int, default=2026)
     analyze = sub.add_parser("analyze")
     analyze.add_argument("kind", choices=["accuracy", "transfer", "crossed", "cues", "components", "opentom", "match"])
@@ -166,7 +171,8 @@ def main(argv=None):
     elif command == "prepare-edits":
         from .traces import prepare_edit_manifest
         write_json(args.output, prepare_edit_manifest([r for p in args.traces for r in read_jsonl(p)],
-                    read_jsonl(args.input), max_worlds=args.max_worlds, seed=args.seed))
+                    read_jsonl(args.input), max_worlds=args.max_worlds, seed=args.seed,
+                    stage=args.stage, half_width=args.precision_half_width))
     elif command == "opentom-import":
         from .opentom import import_opentom
         import_opentom(args.input, args.output, args.source_url)
@@ -241,7 +247,8 @@ def main(argv=None):
                 from .backend import HFBackend
                 donor_backend = HFBackend(args.donor_model, args.donor_adapter, device=args.device, revision=args.donor_revision)
             results = run_component_test(backend, rows, sites, seed=args.seed,
-                         layer_mode=args.layer_mode, donor_backend=donor_backend)
+                         layer_mode=args.layer_mode, donor_backend=donor_backend,
+                         residual_control_layers=args.residual_control_layers)
         elif command == "opentom-evaluate":
             from .opentom import evaluate_opentom
             results = evaluate_opentom(backend, rows, args.reasoning)

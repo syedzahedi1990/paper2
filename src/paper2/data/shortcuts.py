@@ -10,9 +10,9 @@ from collections import Counter, defaultdict
 import math
 from typing import Any, Iterable, Mapping
 
-from .world import LOCATIONS, StoryWorld, ordinary_target
+from .world import AGENTS, LOCATIONS, StoryWorld, ordinary_target
 
-AUDIT_VERSION = "paper2.shortcuts.v3"
+AUDIT_VERSION = "paper2.shortcuts.v4"
 RELATION_WEIGHTS = {"both": 1, "outer_only": 5, "inner_only": 5, "neither": 25}
 
 
@@ -27,6 +27,79 @@ def relation_quota(count: int) -> dict[str, int]:
     return result
 
 
+def _mode_candidates(locations: Iterable[str]) -> set[str]:
+    counts = Counter(locations)
+    maximum = max(counts.values())
+    return {location for location, count in counts.items() if count == maximum}
+
+
+def _residual_heuristics(cell: list[StoryWorld], minimum_cell_size: int,
+                         familywise_alpha: float, position_count: int) -> dict[str, Any]:
+    """Measure remaining usable rules without relabelling their violations as passes."""
+    scores: dict[str, list[float]] = defaultdict(list)
+    ties: Counter[str] = Counter()
+    missing: Counter[str] = Counter()
+    semantic_scores = []
+    for world in cell:
+        target = ordinary_target(world, "direct")
+        relevant = [event for event in world.events if event.object == world.focal_object]
+        initial = world.initial_locations[world.focal_object]
+        for position in range(position_count):
+            rule = f"event_position_{position + 1}"
+            # The rule has a declared fallback, so variable-length stories do
+            # not condition scoring on whether a favourable position exists.
+            location = relevant[position].location if position < len(relevant) else initial
+            missing[rule] += position >= len(relevant)
+            scores[rule].append(float(location == target))
+        frequency_sources = {
+            "most_mentioned_location": [event.location for event in relevant],
+            "most_mentioned_location_with_initial": [initial] + [event.location for event in relevant],
+            "most_mentioned_story_location": list(world.initial_locations.values()) +
+                                              [event.location for event in world.events],
+        }
+        for rule, locations in frequency_sources.items():
+            candidates = _mode_candidates(locations)
+            ties[rule] += len(candidates) > 1
+            scores[rule].append(float(target in candidates) / len(candidates))
+        jointly_observed = [event for event in relevant if set(AGENTS).issubset(event.agents)]
+        joint_location = jointly_observed[-1].location if jointly_observed else initial
+        joint_score = float(joint_location == target)
+        if len(world.focal_word) == 2:
+            # Under the inherited state engine, both observers in the queried
+            # word is precisely the correct update condition at depth two.
+            semantic_scores.append(joint_score)
+        else:
+            scores["last_both_observed"].append(joint_score)
+            missing["last_both_observed"] += not jointly_observed
+    # Four possible strata, all observed event positions and four additional
+    # rules. Keep at least the existing controls' 52-comparison bound.
+    comparisons = max(52, 4 * (position_count + 4))
+    metrics = {}
+    for rule, observations in sorted(scores.items()):
+        n = len(observations)
+        score = sum(observations) / n
+        tolerance = math.sqrt(math.log(2 * comparisons / familywise_alpha) / (2 * n))
+        deviation = abs(score - 1 / len(LOCATIONS))
+        sufficient = n >= minimum_cell_size
+        metrics[rule] = {"n": n, "score": score, "null_expectation": 1 / len(LOCATIONS),
+                         "absolute_deviation": deviation, "maximum_deviation": tolerance,
+                         "sufficient": sufficient, "passed": sufficient and deviation <= tolerance,
+                         "requires_review": sufficient and deviation > tolerance,
+                         "tie_worlds": ties[rule], "initial_fallback_worlds": missing[rule]}
+    semantic_baselines = {}
+    if semantic_scores:
+        semantic_baselines["last_both_observed"] = {
+            "n": len(semantic_scores), "score": sum(semantic_scores) / len(semantic_scores),
+            "expected_accuracy": 1.0,
+            "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+        }
+    failures = [rule for rule, metric in metrics.items() if metric["requires_review"]]
+    return {"metrics": metrics, "semantic_baselines": semantic_baselines,
+            "all_near_chance": bool(metrics) and all(metric["passed"] for metric in metrics.values()),
+            "requires_review": bool(failures), "flagged_rules": failures,
+            "simultaneous_comparisons": comparisons}
+
+
 def audit_shortcuts(worlds: Iterable[StoryWorld], *,
                     cue_rows: Iterable[Mapping[str, Any]] = (),
                     minimum_cell_size: int = 24,
@@ -35,7 +108,7 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
                     require_cues: bool = False,
                     require_relation_quotas: bool = False,
                     require_clean_cue_quota: bool = False) -> dict[str, Any]:
-    """Audit positional, initial, cue and both-sign nested-belief shortcuts.
+    """Audit required controls and remaining positional/frequency heuristics.
 
     Expected equality is 1/6 for either independent first-order belief, 1/36
     for both, and 25/36 for differing from both. The last rate must NOT be
@@ -43,6 +116,9 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
     of disagreements. Candidate-exclusion accuracies test usable answer rules.
     Only clean/independent cues should be near chance; planted cue conditions
     are reported against their intended rates separately by the corpus manifest.
+    Remaining heuristic failures are reported separately from required controls
+    and make `passed` false. An explicit G0 review may accept these documented
+    limitations, but cannot waive required-control or coverage failures.
     """
     if minimum_cell_size < 1 or not 0 < familywise_alpha < 1:
         raise ValueError("Invalid shortcut-audit threshold")
@@ -67,6 +143,8 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
     # At most 4 strata x 13 metrics. A fixed denominator prevents an omitted
     # stratum or unavailable cue from silently weakening the threshold.
     comparisons = 52
+    position_count = max((sum(event.object == world.focal_object for event in world.events)
+                          for world in worlds), default=0)
     strata = {}
     for key, cell in sorted(grouped.items()):
         values: dict[str, list[float]] = defaultdict(list)
@@ -133,13 +211,22 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
         clean_observed = sum(values.get("clean_cue", []))
         clean_passed = not require_clean_cue_quota or (len(values.get("clean_cue", [])) == len(cell)
                                                        and clean_observed == clean_planned)
-        strata[key] = {"n": len(cell), "passed": quota_passed and clean_passed and all(metric["passed"] for metric in metrics.values()),
+        required_passed = quota_passed and clean_passed and all(metric["passed"] for metric in metrics.values())
+        residual = _residual_heuristics(cell, minimum_cell_size, familywise_alpha, position_count)
+        strata[key] = {"n": len(cell), "passed": required_passed and residual["all_near_chance"],
+                       "required_controls_passed": required_passed, "residual_heuristics": residual,
                        "clean_cue_quota": {"required": require_clean_cue_quota, "planned_correct": clean_planned,
                                            "observed_correct": clean_observed, "passed": clean_passed},
                        "metrics": metrics, "relation_quota": {"required": require_relation_quotas and planned is not None,
                                                                "planned": planned, "observed": observed,
                                                                "passed": quota_passed}}
-    return {"audit_version": AUDIT_VERSION, "passed": bool(strata) and coverage_passed and all(cell["passed"] for cell in strata.values()),
+    required_passed = bool(strata) and coverage_passed and all(cell["required_controls_passed"] for cell in strata.values())
+    residual_passed = bool(strata) and all(cell["residual_heuristics"]["all_near_chance"] for cell in strata.values())
+    return {"audit_version": AUDIT_VERSION, "passed": required_passed and residual_passed,
+            "required_controls_passed": required_passed,
+            "all_shortcuts_near_chance": required_passed and residual_passed,
+            "requires_heuristic_review": any(cell["residual_heuristics"]["requires_review"] for cell in strata.values()),
+            "gate_implication": "Required controls cannot be waived; residual failures require corpus-bound G0 review and disclosure",
             "coverage": {"expected_strata": sorted(expected_strata), "missing_strata": missing_strata,
                          "unexpected_strata": unexpected_strata, "cues_required": require_cues,
                          "worlds_missing_clean_cue": missing_cues, "passed": coverage_passed},
@@ -147,5 +234,12 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
             "familywise_alpha": familywise_alpha, "simultaneous_comparisons": comparisons,
             "threshold": "Two-sided Hoeffding bounds; required joint relation and heldout clean-cue quotas must match exactly",
             "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
+            "residual_rule_definitions": {
+                "event_position_N": "Nth focal-object event (one-based); use focal initial location if absent",
+                "most_mentioned_location": "Mode of focal-object event locations; uniform choice among tied modes",
+                "most_mentioned_location_with_initial": "Same mode including focal initial location once",
+                "most_mentioned_story_location": "Mode over all initial and event locations; inventory adds one of each and cannot alter the modes",
+                "last_both_observed": "Last focal-object event received by both characters, else focal initial location; semantic solver at depth two",
+            },
             "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
             "strata": strata}

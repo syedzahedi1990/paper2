@@ -17,7 +17,7 @@ from paper2.data import generate_world, matched_pair
 from paper2.interventions import Site, run_component_test, score_consequence_pattern
 
 
-def tiny_backend(pair):
+def tiny_backend(pair, num_layers=2):
     vocabulary = {"[UNK]": 0, "[PAD]": 1}
     split = pre_tokenizers.Whitespace()
     # Build an offline vocabulary from the complete local fixture's characters.
@@ -30,7 +30,7 @@ def tiny_backend(pair):
     tokenizer.chat_template = "{% for message in messages %}{{ message['role'] + ': ' + message['content'] + '\n' }}{% endfor %}assistant: "
     torch.manual_seed(0)
     config = Qwen2Config(vocab_size=len(vocabulary), hidden_size=16, intermediate_size=24,
-                         num_hidden_layers=2, num_attention_heads=2, num_key_value_heads=1,
+                         num_hidden_layers=num_layers, num_attention_heads=2, num_key_value_heads=1,
                          max_position_embeddings=2048)
     config._attn_implementation = "eager"
     backend = HFBackend.__new__(HFBackend)
@@ -56,7 +56,9 @@ def test_real_pairs_run_with_forecasts_and_serializable_receipts(event_kind, mon
     # rather than averaging separate single-layer runs.
     assert len(calls) == 8 * (2 + 3 * 3)
     json.dumps(rows, allow_nan=False)
-    assert len([row for row in rows if row["positive_control"]]) == 8
+    assert not any(row["positive_control"] for row in rows)
+    assert {row["g4_control_reason"] for row in rows if row["component"] == "residual"} == {
+        "includes_layer_zero_input_reconstruction_risk"}
     for row in rows:
         assert row["forecast_target"] == pair["forecasts"][row["view"]]["event_rewrite"]
         if row["control"] == "own":
@@ -88,6 +90,52 @@ def test_joint_and_single_masks_preserve_head_selection():
     assert all(site.heads == (0,) for _, component, selected in masks if component != 'residual' for site in selected)
     with pytest.raises(ValueError, match='repeat'):
         intervention_masks(sites + [sites[0]])
+
+
+def test_explicit_nonzero_residual_control_keeps_full_depth_key_value_masks():
+    from paper2.interventions.controls import residual_control_summary
+    pair = matched_pair(generate_world(random.Random(13), distractor_events=0))
+    backend = tiny_backend(pair, num_layers=3)
+    sites = [Site(layer, component) for layer in range(3) for component in ("k", "v", "residual")]
+    rows = run_component_test(backend, [pair], sites, residual_control_layers=[1])
+    assert len(rows) == 8 * (2 + 4 * 3)
+    assert {tuple(row["layers"]) for row in rows if row["component"] in ("k", "v")} == {(0, 1, 2)}
+    controls = [row for row in rows if row["positive_control"]]
+    assert len(controls) == 8 and all(row["layers"] == [1] for row in controls)
+    assert residual_control_summary(rows)["eligible_masks"] == ["1"]
+    assert not residual_control_summary(rows)["empirical_gate_passed"]
+    with pytest.raises(ValueError, match="greater than zero"):
+        run_component_test(backend, [pair], sites, residual_control_layers=[0, 1])
+    with pytest.raises(ValueError, match="no_downstream_attention"):
+        run_component_test(backend, [pair], sites, residual_control_layers=[2])
+
+
+def test_nonzero_residual_is_real_intervention_without_donor_reconstruction():
+    from paper2.interventions import ComponentInterventionEngine, encode_input
+    from paper2.prompts import render_prompt
+    pair = matched_pair(generate_world(random.Random(13), distractor_events=0))
+    backend = tiny_backend(pair, num_layers=3)
+    inputs = []
+    for row in (pair["recipient"][0], pair["donor"][0]):
+        prompt = render_prompt(backend.tokenizer, row, reasoning=False)
+        origin = prompt.index(row["story"])
+        a, b = row["critical_value_span"]
+        inputs.append(encode_input(backend.tokenizer, prompt, (origin + a, origin + b)))
+    engine = ComponentInterventionEngine(backend.model, backend.checkpoint_id)
+    sites = [Site(layer, "residual") for layer in range(3)]
+    recipient, donor = [engine.capture(value, sites) for value in inputs]
+    natural = engine.swap(inputs[0], recipient, donor, [Site(1, "residual")])
+    assert not torch.equal(natural.next_token_logits, recipient.next_token_logits)
+    assert not torch.equal(natural.next_token_logits, donor.next_token_logits)
+    # These are block-output hooks. Even an all-layer patch need not exactly
+    # reconstruct the donor: noncritical rows retain earlier recipient effects.
+    # It is nevertheless conservatively excluded from empirical G4 evidence.
+    reconstruction_risk = engine.swap(inputs[0], recipient, donor, sites)
+    assert not torch.equal(reconstruction_risk.next_token_logits, donor.next_token_logits)
+    own = engine.swap(inputs[0], recipient, donor, [Site(1, "residual")], control="own")
+    assert torch.equal(own.next_token_logits, recipient.next_token_logits)
+    disconnected = engine.swap(inputs[0], recipient, donor, [Site(2, "residual")])
+    assert torch.equal(disconnected.next_token_logits, recipient.next_token_logits)
 
 
 def test_cross_checkpoint_runner_requires_identical_complete_tokens():

@@ -1,6 +1,7 @@
 {
   "confirmation": {
-    "audit_version": "paper2.shortcuts.v3",
+    "all_shortcuts_near_chance": false,
+    "audit_version": "paper2.shortcuts.v4",
     "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
     "coverage": {
       "cues_required": true,
@@ -17,8 +18,18 @@
     },
     "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
     "familywise_alpha": 0.01,
+    "gate_implication": "Required controls cannot be waived; residual failures require corpus-bound G0 review and disclosure",
     "minimum_cell_size": 24,
-    "passed": true,
+    "passed": false,
+    "required_controls_passed": true,
+    "requires_heuristic_review": true,
+    "residual_rule_definitions": {
+      "event_position_N": "Nth focal-object event (one-based); use focal initial location if absent",
+      "last_both_observed": "Last focal-object event received by both characters, else focal initial location; semantic solver at depth two",
+      "most_mentioned_location": "Mode of focal-object event locations; uniform choice among tied modes",
+      "most_mentioned_location_with_initial": "Same mode including focal initial location once",
+      "most_mentioned_story_location": "Mode over all initial and event locations; inventory adds one of each and cannot alter the modes"
+    },
     "simultaneous_comparisons": 52,
     "strata": {
       "depth1__move": {
@@ -75,12 +86,180 @@
           }
         },
         "n": 30,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": null,
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "last_both_observed"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.19999999999999998,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.36666666666666664,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.23333333333333336,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.4,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.06666666666666665,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.4,
+              "initial_fallback_worlds": 7,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.5666666666666667,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.21388888888888888,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.38055555555555554,
+              "sufficient": true,
+              "tie_worlds": 8
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.15833333333333335,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.325,
+              "sufficient": true,
+              "tie_worlds": 12
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.07777777777777778,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.24444444444444444,
+              "sufficient": true,
+              "tie_worlds": 10
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth1__tell": {
@@ -137,12 +316,180 @@
           }
         },
         "n": 30,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": null,
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "last_both_observed"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.06666666666666665,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.43333333333333335,
+              "initial_fallback_worlds": 4,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.6,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.08333333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.25,
+              "sufficient": true,
+              "tie_worlds": 4
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 7
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.05833333333333332,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.10833333333333334,
+              "sufficient": true,
+              "tie_worlds": 6
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__move": {
@@ -292,6 +639,167 @@
             "outer_only": 4
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": true,
+          "flagged_rules": [],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.18055555555555555,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3472222222222222,
+              "sufficient": true,
+              "tie_worlds": 6
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.20833333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.375,
+              "sufficient": true,
+              "tie_worlds": 6
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.06944444444444445,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2361111111111111,
+              "sufficient": true,
+              "tie_worlds": 11
+            }
+          },
+          "requires_review": false,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 30,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__tell": {
@@ -441,6 +949,167 @@
             "outer_only": 4
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": true,
+          "flagged_rules": [],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.022222222222222254,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1888888888888889,
+              "sufficient": true,
+              "tie_worlds": 9
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.05555555555555558,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.22222222222222224,
+              "sufficient": true,
+              "tie_worlds": 11
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.11666666666666667,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2833333333333333,
+              "sufficient": true,
+              "tie_worlds": 5
+            }
+          },
+          "requires_review": false,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 30,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       }
     },
@@ -448,7 +1117,8 @@
     "worlds": 120
   },
   "development": {
-    "audit_version": "paper2.shortcuts.v3",
+    "all_shortcuts_near_chance": false,
+    "audit_version": "paper2.shortcuts.v4",
     "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
     "coverage": {
       "cues_required": true,
@@ -465,8 +1135,18 @@
     },
     "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
     "familywise_alpha": 0.01,
+    "gate_implication": "Required controls cannot be waived; residual failures require corpus-bound G0 review and disclosure",
     "minimum_cell_size": 24,
-    "passed": true,
+    "passed": false,
+    "required_controls_passed": true,
+    "requires_heuristic_review": true,
+    "residual_rule_definitions": {
+      "event_position_N": "Nth focal-object event (one-based); use focal initial location if absent",
+      "last_both_observed": "Last focal-object event received by both characters, else focal initial location; semantic solver at depth two",
+      "most_mentioned_location": "Mode of focal-object event locations; uniform choice among tied modes",
+      "most_mentioned_location_with_initial": "Same mode including focal initial location once",
+      "most_mentioned_story_location": "Mode over all initial and event locations; inventory adds one of each and cannot alter the modes"
+    },
     "simultaneous_comparisons": 52,
     "strata": {
       "depth1__move": {
@@ -529,6 +1209,172 @@
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": true,
+          "flagged_rules": [],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.19999999999999998,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.36666666666666664,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.30000000000000004,
+              "initial_fallback_worlds": 10,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.4666666666666667,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.1222222222222222,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.28888888888888886,
+              "sufficient": true,
+              "tie_worlds": 4
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.08333333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.25,
+              "sufficient": true,
+              "tie_worlds": 11
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.05000000000000002,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.21666666666666667,
+              "sufficient": true,
+              "tie_worlds": 4
+            }
+          },
+          "requires_review": false,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth1__tell": {
@@ -585,12 +1431,180 @@
           }
         },
         "n": 30,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": null,
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "last_both_observed"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.06666666666666665,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.23333333333333336,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.4,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.5,
+              "initial_fallback_worlds": 4,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.6666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.2694444444444445,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.4361111111111111,
+              "sufficient": true,
+              "tie_worlds": 12
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.19999999999999998,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.36666666666666664,
+              "sufficient": true,
+              "tie_worlds": 11
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 7
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__move": {
@@ -740,6 +1754,167 @@
             "outer_only": 4
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": true,
+          "flagged_rules": [],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.06666666666666665,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.13888888888888887,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3055555555555555,
+              "sufficient": true,
+              "tie_worlds": 11
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.1411111111111111,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.30777777777777776,
+              "sufficient": true,
+              "tie_worlds": 11
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 8
+            }
+          },
+          "requires_review": false,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 30,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__tell": {
@@ -889,6 +2064,167 @@
             "outer_only": 4
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": true,
+          "flagged_rules": [],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.033333333333333326,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.13333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.033333333333333354,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.2,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.30000000000000004,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.4666666666666667,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.1,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.26666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.16666666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3333333333333333,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.06666666666666668,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23333333333333334,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.06666666666666665,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.22222222222222224,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3888888888888889,
+              "sufficient": true,
+              "tie_worlds": 8
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.19444444444444445,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.3611111111111111,
+              "sufficient": true,
+              "tie_worlds": 8
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.07777777777777778,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.3926313174198212,
+              "n": 30,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.24444444444444444,
+              "sufficient": true,
+              "tie_worlds": 7
+            }
+          },
+          "requires_review": false,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 30,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       }
     },
@@ -896,7 +2232,8 @@
     "worlds": 120
   },
   "train": {
-    "audit_version": "paper2.shortcuts.v3",
+    "all_shortcuts_near_chance": false,
+    "audit_version": "paper2.shortcuts.v4",
     "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
     "coverage": {
       "cues_required": true,
@@ -913,8 +2250,18 @@
     },
     "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
     "familywise_alpha": 0.01,
+    "gate_implication": "Required controls cannot be waived; residual failures require corpus-bound G0 review and disclosure",
     "minimum_cell_size": 24,
-    "passed": true,
+    "passed": false,
+    "required_controls_passed": true,
+    "requires_heuristic_review": true,
+    "residual_rule_definitions": {
+      "event_position_N": "Nth focal-object event (one-based); use focal initial location if absent",
+      "last_both_observed": "Last focal-object event received by both characters, else focal initial location; semantic solver at depth two",
+      "most_mentioned_location": "Mode of focal-object event locations; uniform choice among tied modes",
+      "most_mentioned_location_with_initial": "Same mode including focal initial location once",
+      "most_mentioned_story_location": "Mode over all initial and event locations; inventory adds one of each and cannot alter the modes"
+    },
     "simultaneous_comparisons": 52,
     "strata": {
       "depth1__move": {
@@ -971,12 +2318,188 @@
           }
         },
         "n": 504,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": null,
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "event_position_2",
+            "event_position_3",
+            "event_position_4",
+            "event_position_5",
+            "event_position_6",
+            "event_position_7",
+            "last_both_observed",
+            "most_mentioned_location",
+            "most_mentioned_location_with_initial"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.04166666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.125,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.14682539682539683,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3134920634920635,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.12500000000000003,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.2916666666666667,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.16468253968253968,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.33134920634920634,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.14285714285714288,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.30952380952380953,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.12896825396825398,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.29563492063492064,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.11706349206349206,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.2837301587301587,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.019841269841269826,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.14682539682539683,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.011904761904761918,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.17857142857142858,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.39880952380952384,
+              "initial_fallback_worlds": 105,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.5654761904761905,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.17162698412698416,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3382936507936508,
+              "sufficient": true,
+              "tie_worlds": 159
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.15605158730158733,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.322718253968254,
+              "sufficient": true,
+              "tie_worlds": 151
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.06646825396825398,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09579223282797054,
+              "n": 504,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.23313492063492064,
+              "sufficient": true,
+              "tie_worlds": 92
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth1__tell": {
@@ -1033,12 +2556,189 @@
           }
         },
         "n": 498,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": null,
           "passed": true,
           "planned": null,
           "required": false
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "event_position_2",
+            "event_position_3",
+            "event_position_4",
+            "event_position_5",
+            "event_position_6",
+            "event_position_7",
+            "last_both_observed",
+            "most_mentioned_location",
+            "most_mentioned_location_with_initial",
+            "most_mentioned_story_location"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.01807228915662651,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.14859437751004015,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.16265060240963855,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3293172690763052,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.1104417670682731,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.27710843373493976,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.11847389558232932,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.285140562248996,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.1345381526104418,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.30120481927710846,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.14859437751004015,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3152610441767068,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.16867469879518074,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3353413654618474,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.0020080321285140534,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1686746987951807,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.016064257028112455,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.1827309236947791,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "last_both_observed": {
+              "absolute_deviation": 0.4136546184738956,
+              "initial_fallback_worlds": 112,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.5803212851405622,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.1854082998661312,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.35207496653279785,
+              "sufficient": true,
+              "tie_worlds": 162
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.1755354752342704,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.34220214190093706,
+              "sufficient": true,
+              "tie_worlds": 161
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.09939759036144577,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.2660642570281124,
+              "sufficient": true,
+              "tie_worlds": 118
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {},
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__move": {
@@ -1172,7 +2872,7 @@
           }
         },
         "n": 500,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": {
             "both": 14,
@@ -1188,6 +2888,177 @@
             "outer_only": 70
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "event_position_2",
+            "event_position_3",
+            "event_position_4",
+            "event_position_5",
+            "event_position_6",
+            "event_position_7",
+            "most_mentioned_location",
+            "most_mentioned_location_with_initial",
+            "most_mentioned_story_location"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.04266666666666666,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.124,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.14133333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.308,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.12133333333333332,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.288,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.12933333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.296,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.14933333333333335,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.316,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.13933333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.306,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.13333333333333333,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.011333333333333334,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.178,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.010666666666666658,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.156,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.168,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.33466666666666667,
+              "sufficient": true,
+              "tie_worlds": 164
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.17916666666666667,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3458333333333333,
+              "sufficient": true,
+              "tie_worlds": 156
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.0965,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09617463847152982,
+              "n": 500,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.26316666666666666,
+              "sufficient": true,
+              "tie_worlds": 118
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 500,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       },
       "depth2__tell": {
@@ -1321,7 +3192,7 @@
           }
         },
         "n": 498,
-        "passed": true,
+        "passed": false,
         "relation_quota": {
           "observed": {
             "both": 14,
@@ -1337,6 +3208,177 @@
             "outer_only": 69
           },
           "required": true
+        },
+        "required_controls_passed": true,
+        "residual_heuristics": {
+          "all_near_chance": false,
+          "flagged_rules": [
+            "event_position_2",
+            "event_position_3",
+            "event_position_4",
+            "event_position_5",
+            "event_position_6",
+            "event_position_7",
+            "most_mentioned_location",
+            "most_mentioned_location_with_initial",
+            "most_mentioned_story_location"
+          ],
+          "metrics": {
+            "event_position_1": {
+              "absolute_deviation": 0.034136546184738964,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.20080321285140562,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_2": {
+              "absolute_deviation": 0.15060240963855423,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3172690763052209,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_3": {
+              "absolute_deviation": 0.13253012048192772,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.2991967871485944,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_4": {
+              "absolute_deviation": 0.15662650602409642,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3232931726907631,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_5": {
+              "absolute_deviation": 0.14457831325301204,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3112449799196787,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_6": {
+              "absolute_deviation": 0.12248995983935743,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.2891566265060241,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_7": {
+              "absolute_deviation": 0.14859437751004015,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3152610441767068,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_8": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "event_position_9": {
+              "absolute_deviation": 0.0,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": true,
+              "requires_review": false,
+              "score": 0.16666666666666666,
+              "sufficient": true,
+              "tie_worlds": 0
+            },
+            "most_mentioned_location": {
+              "absolute_deviation": 0.21536144578313252,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3820281124497992,
+              "sufficient": true,
+              "tie_worlds": 159
+            },
+            "most_mentioned_location_with_initial": {
+              "absolute_deviation": 0.21017402945113786,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.3768406961178045,
+              "sufficient": true,
+              "tie_worlds": 153
+            },
+            "most_mentioned_story_location": {
+              "absolute_deviation": 0.10240963855421689,
+              "initial_fallback_worlds": 0,
+              "maximum_deviation": 0.09636756672655303,
+              "n": 498,
+              "null_expectation": 0.16666666666666666,
+              "passed": false,
+              "requires_review": true,
+              "score": 0.26907630522088355,
+              "sufficient": true,
+              "tie_worlds": 107
+            }
+          },
+          "requires_review": true,
+          "semantic_baselines": {
+            "last_both_observed": {
+              "expected_accuracy": 1.0,
+              "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
+              "n": 498,
+              "score": 1.0
+            }
+          },
+          "simultaneous_comparisons": 52
         }
       }
     },

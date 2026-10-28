@@ -24,7 +24,18 @@ class ComputeLedger:
     update_seconds: float = 0.0
     optimizer_seconds: float = 0.0
     checkpoint_seconds: float = 0.0
+    completed_optimizer_steps: int = 0
+    evaluated_adapter_save_seconds: float = 0.0
+    evaluated_adapter_save_count: int = 0
+    resumable_checkpoint_save_seconds: float = 0.0
+    resumable_checkpoint_save_count: int = 0
+    final_adapter_save_seconds: float = 0.0
+    max_evaluated_adapter_bytes: int = 0
     evaluation_seconds: float = 0.0
+    evaluation_panels: int = 0
+    evaluation_native_generations: int = 0
+    evaluation_immediate_forward_calls: int = 0
+    evaluation_generated_tokens: int = 0
     wall_seconds: float = 0.0
     gpu_seconds: float = 0.0
     peak_cuda_memory_bytes: int = 0
@@ -48,6 +59,9 @@ class ComputeLedger:
             'update_seconds': 'Forward/backward plus optimizer steps, excluding generation/scoring; includes trainer bookkeeping inside training_step.',
             'gpu_seconds': 'Elapsed occupied CUDA device time for one process/device; includes generation, updates, checkpointing and evaluation.',
             'trace_cap_hits': 'Rollouts in which the 384-token cap required an injected answer delimiter.',
+            'evaluation_panels': 'Actual complete native plus immediate development passes, including repeats after resume.',
+            'evaluation_generated_tokens': 'Native development completion tokens; excluded from training rollout token counts.',
+            'max_evaluated_adapter_bytes': 'Largest measured adapter snapshot directory, including tokenizer and configuration files.',
         }
         return result
 

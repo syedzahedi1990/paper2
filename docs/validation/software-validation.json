@@ -1,13 +1,14 @@
 {
-  "code_test_config_sha256": "0905d0c8f0dfd012dcb87a8c8f73f3eb3eed82a813d82fc2e525de5cebee161b",
+  "calibration_ready": false,
+  "code_test_config_sha256": "8046f6950d63a14885e4c383a3dfab4e47913df9a9fa58b88c19e98dbb3b9ac1",
   "core_environment_without_torch": {
     "errors": 0,
     "failures": 0,
-    "seconds": 25.64,
-    "skipped": 11,
-    "tests": 136
+    "seconds": 28.945,
+    "skipped": 12,
+    "tests": 160
   },
-  "corpus_hash": "fe78e3b08542526395ae34a94f4de336ec2aebf85ad49c91962bdc74ddcdbe20",
+  "corpus_hash": "b5344b9ad3ae4864b7052b32bc00c4c8dfdc5d59953d25222b33274754c50919",
   "dependency_check": "pip check: passed",
   "errors": 0,
   "failures": 0,
@@ -15,12 +16,14 @@
   "platform": "macOS-14.7.4-arm64-arm-64bit",
   "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
   "python": "3.12.14",
+  "required_controls_passed": true,
+  "requires_heuristic_review": true,
   "research_model_training_run": false,
-  "scope": "CPU unit and genuine tiny-random-Qwen integration; structural corpus and cached tokenizer audits; empirical G0\u2013G4 remain pending",
-  "seconds": 33.06,
+  "scope": "CPU unit and genuine tiny-Qwen integration; audit v4 retains measured weak heuristics and requires G0 review; no empirical G0-G4 decisions",
+  "seconds": 37.188,
   "skipped": 0,
-  "test_command": "python -m pytest -q --junitxml=/tmp/paper2-corrected-tests.xml",
-  "tests": 156,
+  "test_command": "python -m pytest -q --junitxml=/tmp/paper2-v030-tests.xml",
+  "tests": 182,
   "validated_stack": {
     "accelerate": "1.8.1",
     "datasets": "3.6.0",
@@ -31,7 +34,7 @@
     "transformers": "4.53.2",
     "trl": "0.20.0"
   },
-  "wheel": "paper2_reasoning_rl-0.2.0-py3-none-any.whl",
-  "wheel_sha256": "8c38bf53b848da2be412f880e1aad854bc6791232ee66f89e6f99ebe3b21037f",
+  "wheel": "paper2_reasoning_rl-0.3.0-py3-none-any.whl",
+  "wheel_sha256": "a4a6931510f09b343bd4baf219788596c25c4204b8cb11ffc7eb2f58458d03bb",
   "windows_ci": "Workflow added; not claimed as executed locally"
 }

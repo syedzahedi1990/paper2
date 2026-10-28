@@ -1,7 +1,7 @@
 {
-  "calibration_ready": true,
+  "calibration_ready": false,
   "compute": "CPU generation and tokenizer only; no model weights or research training",
-  "corpus_hash": "fe78e3b08542526395ae34a94f4de336ec2aebf85ad49c91962bdc74ddcdbe20",
+  "corpus_hash": "b5344b9ad3ae4864b7052b32bc00c4c8dfdc5d59953d25222b33274754c50919",
   "corpus_schema_version": "paper2.corpus.v3",
   "cue_design": {
     "agree": 1.0,
@@ -29,10 +29,12 @@
   "empirical_gates_passed": [],
   "family_overlap": 0,
   "files": 17,
-  "manifest_sha256": "8e51fcb9c807d747d002bcf1090409b062e6817ba853078d06e15e4ba5111668",
+  "manifest_sha256": "9e36ab30c70dabe7c46429313a9097e820ae869699b130b6d458fe98027cbf77",
   "rendered_story_overlap": 0,
+  "required_controls_passed": true,
+  "requires_heuristic_review": true,
   "shortcut_audit_file": "shortcut-audit.json",
-  "shortcut_audit_sha256": "66b933699df566ae9ee0b7ec7dcf1ce148ad18476f252546cdaca306048d1126",
+  "shortcut_audit_sha256": "5c804571e04fda74baf524a28b6b8de978e47c0c509bc7745f2bee25a04471f2",
   "source_provenance": {
     "consequence_source": "v5.5-reviewer-repository/gpu/consequence_task.py",
     "consequence_source_sha256": "c872a4ce083ae569ddc152ea5f19a1ae1e92cea4de016e5be68121ed62512789",

@@ -3,6 +3,7 @@ import pytest
 from paper2.training.config import TrainingConfig, experiment_matrix, LORA_MODULES
 from paper2.training.data import answer_reward, validate_rows, make_sft_rows, make_rl_rows
 from paper2.training.ledger import ComputeLedger
+from paper2.training.resources import full_pool_projection, resource_plan
 
 
 def row(i=0, **changes):
@@ -53,6 +54,51 @@ def test_unique_world_coverage_is_not_completion_count():
     ledger.observe_worlds(['b', 'c'])
     assert ledger.to_dict()['unique_worlds_seen'] == 3
     assert ledger.to_dict()['training_pool_coverage'] == .75
+
+
+def test_evaluation_budget_is_sparse_for_rl_and_keeps_base_final_and_profile():
+    rl = TrainingConfig()
+    sft = TrainingConfig(arm='label_sft')
+    plan = resource_plan(rl, 2000, 120, 3)
+    assert plan['evaluation_steps'] == [0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000]
+    assert plan['evaluation_native_generations'] == 1080
+    assert plan['evaluation_generated_token_upper_bound'] == 1080 * 391
+    assert plan['retained_evaluated_adapters'] == 9
+    assert resource_plan(sft, 2000, 120, 3)['evaluation_panels'] == 11
+    assert rl.evaluation_schedule(503) == [0, 250, 500, 503]
+    assert TrainingConfig(stage='profile', max_steps=5, eval_steps=5).evaluation_schedule(5) == [0, 5]
+    assert TrainingConfig(eval_steps=200).evaluation_schedule(503) == [0, 200, 400, 503]
+
+
+def test_shipped_learning_configs_use_the_documented_evaluation_budget():
+    from pathlib import Path
+    from paper2.training.config import load_config
+    root = Path(__file__).resolve().parents[1]
+    for path in (root / 'configs').glob('*/*.json'):
+        config = load_config(path)
+        assert config.eval_steps == (250 if config.rl else 25)
+        assert resource_plan(config, 2000, 120, 3)['evaluation_panels'] == (9 if config.rl else 11)
+    profile = load_config(root / 'configs/profile_3b.json')
+    assert resource_plan(profile, 2000, 120, 3)['evaluation_steps'] == [0, 5]
+
+
+def test_projection_scales_training_and_evaluation_separately_and_reports_storage():
+    config = TrainingConfig(stage='profile', max_steps=5, eval_steps=5, save_steps=5)
+    measured = dict(completed_optimizer_steps=5, wall_seconds=30, evaluation_seconds=20,
+                    checkpoint_seconds=4, evaluation_panels=2, evaluated_adapter_save_count=2,
+                    evaluated_adapter_save_seconds=2, resumable_checkpoint_save_count=1,
+                    resumable_checkpoint_save_seconds=1, final_adapter_save_seconds=1,
+                    max_evaluated_adapter_bytes=100)
+    projection = full_pool_projection(config, 2000, 120, 3, measured)
+    assert projection['projected_seconds']['development_evaluation'] == 90
+    assert projection['projected_seconds']['training_and_orchestration'] == 2400
+    assert projection['projected_total_seconds'] == 2540
+    assert projection['projected_evaluated_adapter_bytes'] == 900
+    assert projection['plan']['resumable_checkpoint_writes'] == 40
+    assert projection['status'] == 'planning_estimate_requires_longer_gpu_profile_and_review'
+    incomplete = full_pool_projection(config, 2000, 120, 3, {})
+    assert incomplete['projected_total_seconds'] is None
+    assert incomplete['projected_evaluated_adapter_bytes'] is None
 
 
 @pytest.mark.parametrize('changes', [{'view': 'search'}, {'split': 'confirmation'}, {'dataset': 'shortcut'}, {'answer': 'box'}, {'targets': []}])

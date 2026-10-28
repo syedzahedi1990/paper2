@@ -288,6 +288,7 @@ class ComponentInterventionEngine:
             "donor_prefix_sha256": _digest_json(source.encoded.prefix),
             "key_site": "post_bias_pre_native_RoPE", "value_site": "post_bias_pre_native_GQA_repeat",
             "residual_site": "decoder_block_output", "layer_indexing": "zero_based",
+            "model_num_hidden_layers": len(self.layers),
             "native_attention": True, "use_cache": False, "direct_query_modification": False,
             "downstream_computation_may_respond": True, "nulls": nulls, "sites": audit,
         }

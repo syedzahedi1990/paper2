@@ -3,10 +3,11 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Iterable
 from .components import ComponentInterventionEngine, Site, encode_input
+from .controls import residual_control_eligibility
 
 
-def intervention_masks(sites, mode="joint"):
-    """Use the same declared layer mask for K, V and the residual control."""
+def intervention_masks(sites, mode="joint", residual_control_layers=None):
+    """Retain component masks and optionally add a separate residual control band."""
     sites = tuple(sites)
     if mode not in ("joint", "single", "both"):
         raise ValueError("Unknown layer mode")
@@ -20,12 +21,22 @@ def intervention_masks(sites, mode="joint"):
     masks = [tuple(layers)] if mode in ("joint", "both") else []
     if mode in ("single", "both"):
         masks.extend((layer,) for layer in layers if (layer,) not in masks)
-    return [(mask, component, tuple(by_site[layer, component] for layer in mask))
-            for mask in masks for component in ("k", "v", "residual")]
+    result = [(mask, component, tuple(by_site[layer, component] for layer in mask))
+              for mask in masks for component in ("k", "v", "residual")]
+    if residual_control_layers is not None:
+        requested = tuple(residual_control_layers)
+        if (not requested or any(type(layer) is not int or layer <= 0 for layer in requested)
+                or len(set(requested)) != len(requested)):
+            raise ValueError("Residual positive-control layers must be distinct integers greater than zero")
+        mask = tuple(sorted(requested))
+        if not any(existing == mask and component == "residual" for existing, component, _ in result):
+            result.append((mask, "residual", tuple(Site(layer, "residual") for layer in mask)))
+    return result
 
 
 def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Iterable[Site],
-                       *, seed: int = 0, layer_mode="joint", donor_backend=None) -> list[dict[str, Any]]:
+                       *, seed: int = 0, layer_mode="joint", donor_backend=None,
+                       residual_control_layers=None) -> list[dict[str, Any]]:
     """Swap all selected layers at once per component, with own/null controls.
 
     A donor backend explicitly requests a secondary between-checkpoint analysis:
@@ -35,9 +46,15 @@ def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Ite
     """
     from paper2.prompts import answer_token_ids, render_prompt
     sites = tuple(sites)
-    masks = intervention_masks(sites, layer_mode)
+    masks = intervention_masks(sites, layer_mode, residual_control_layers)
     engine = ComponentInterventionEngine(backend.model, backend.checkpoint_id)
     cross = donor_backend is not None
+    if residual_control_layers is not None:
+        eligible, reason = residual_control_eligibility(residual_control_layers, len(engine.layers), cross=cross)
+        if not eligible:
+            raise ValueError(f"Residual positive-control band is ineligible: {reason}")
+    # An additional control band may include sites outside the primary K/V band.
+    sites = tuple({(site.layer, site.component): site for _, _, selected in masks for site in selected}.values())
     donor_engine = ComponentInterventionEngine(donor_backend.model, donor_backend.checkpoint_id) if cross else engine
     rows = []
     for pair in pairs:
@@ -82,13 +99,20 @@ def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Ite
                 "change_required": target != recipient_row["answer"],
                 "baseline_prediction": baseline.prediction,
                 "baseline_correct": baseline.prediction == recipient_row["answer"],
+                "model_num_hidden_layers": len(engine.layers),
             }
 
             def add(logits, control, *, mask=(), component=None, receipt=None, role="recipient"):
                 answer = backend.answer_from_logits(logits, mappings[role])
+                eligible, reason = residual_control_eligibility(mask, len(engine.layers), cross=cross)
+                eligible = eligible and component == "residual"
+                if component != "residual":
+                    reason = "not_residual"
                 rows.append({**common, "layer": mask[0] if len(mask) == 1 else None,
                              "layers": list(mask), "mask_id": ",".join(map(str, mask)), "component": component,
-                             "control": control, "positive_control": not cross and component == "residual" and control == "natural",
+                             "control": control, "positive_control": eligible and control == "natural",
+                             "positive_control_candidate": component == "residual" and control == "natural",
+                             "g4_control_eligible": eligible, "g4_control_reason": reason,
                              **asdict(answer), "forecast_correct": answer.prediction == target,
                              "forecast_probability": answer.probabilities[target],
                              "ordinary_correct": answer.prediction == recipient_row["answer"],

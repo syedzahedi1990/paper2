@@ -221,7 +221,58 @@ def _crossed_original_contrasts(baselines, cells, identities, seed=2026, samples
     return output
 
 
-def _trace_control_summary(cells):
+def _edit_precision_summary(rows, original, seed, samples):
+    """Report actual story uncertainty; a small pilot cannot certify precision."""
+    _index(rows)
+    plans = [row.get("edit_precision_plan") for row in rows]
+    plan = plans[0] if plans else None
+    if any(candidate != plan for candidate in plans):
+        raise ValueError("Targeted edits mix different precision plans")
+    if plan is not None:
+        from .precision import edit_precision_plan
+        expected = edit_precision_plan(plan["selected_worlds"], stage=plan["stage"],
+                     max_worlds=plan["selected_worlds"], half_width=plan["target_half_width"])
+        if plan != expected:
+            raise ValueError("Invalid targeted-edit precision plan")
+        if plan["stage"] == "confirmatory" and len({row["world_id"] for row in rows}) != plan["selected_worlds"]:
+            raise ValueError("Confirmatory targeted-edit results are missing planned worlds")
+        if plan["stage"] == "confirmatory":
+            _, incomplete = _joint_patterns(rows)
+            if incomplete:
+                raise ValueError("Confirmatory targeted edits require complete eight-view panels")
+            if original is not None:
+                worlds = {row["world_id"] for row in rows}
+                list(paired_rows([row for row in original if row["world_id"] in worlds], rows))
+    groups = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        world = row["world_id"]
+        follows = int(row["prediction"] == row["expected_edited_answer"])
+        groups["all_predicted_consequences"][world].append(follows)
+        metric = "changed_target_compliance" if row["expected_edited_answer"] != row["answer"] else "intact_target_preservation"
+        groups[metric][world].append(follows)
+    if original is not None:
+        for before, after in paired_rows(_baseline_subset(original, rows), rows):
+            if after["expected_edited_answer"] != after["answer"]:
+                effect = int(after["prediction"] == after["expected_edited_answer"]) - int(
+                    before["prediction"] == after["expected_edited_answer"])
+                groups["changed_response_increase_vs_original"][after["world_id"]].append(effect)
+    metrics = {}
+    for name, values in groups.items():
+        result = cluster_interval(values, seed=seed, samples=samples)
+        half_width = max(abs(endpoint - result["estimate"]) for endpoint in result["ci95"]) if result["ci95"] else None
+        is_rate = name != "changed_response_increase_vs_original"
+        result.update(observed_half_width=half_width,
+                      confirmatory_precision_ready=bool(is_rate and plan and plan.get("stage") == "confirmatory"
+                          and result["stories"] >= plan["required_worlds"] and half_width is not None
+                          and half_width <= plan["target_half_width"]),
+                      covered_by_rate_sample_plan=is_rate)
+        metrics[name] = result
+    return {"plan": plan, "metrics": metrics,
+            "interpretation": "Fixed seeds and views averaged within story. The 12-world pilot is diagnostic. "
+                              "Rate planning does not size paired differences or ratios; no automatic quadrant label."}
+
+
+def _trace_control_summary(cells, seed=2026, samples=2000):
     output = {}
     for key, rows in sorted(cells.items()):
         reader, source, condition, timing = key
@@ -266,6 +317,7 @@ def _trace_control_summary(cells):
                 summary["intact_target_n"] = len(intact)
                 summary["intact_target_preservation"] = float(np.mean([
                     r["prediction"] == r["answer"] for r in intact])) if intact else None
+                summary["story_precision"] = _edit_precision_summary(rows, original, seed, samples)
         output["|".join(key)] = summary
     return output
 
@@ -326,7 +378,7 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
         contrasts = _crossed_original_contrasts(baselines, cells, identities, seed=seed, samples=samples)
     else:
         contrasts = {"status": "identities_required", "reason": "Supply unambiguous base/trained reader and source labels"}
-    return {"cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells),
+    return {"cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells, seed, samples),
             "identities": dict(zip(("base_reader", "trained_reader", "base_source", "trained_source"), identities)),
             "supplied_text_identity_verified": bool(supplied),
             "uncertainty": "Whole-story bootstrap after averaging fixed-seed error/repair counts within story; no inference over a population of seeds.",

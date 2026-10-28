@@ -6,7 +6,7 @@ Implementation of the 27 October 2026 proposal, following [Paper 1 / v5.5](https
 
 This repository supplies the controlled data, four LoRA training arms, three experiment runners, analysis, and pilot review gates. It does **not** contain trained research checkpoints or empirical claims that reasoning RL improves belief tracking. Tiny random-model integration tests establish that the software executes; G0–G4 still require actual development measurements.
 
-The review corrections use **corpus schema v3**. Regenerate earlier datasets and repeat G0; previous manifests and calibration approvals cannot authorize training. Stratified shortcut audits include first/last/initial/cue rules and both equality and disagreement with first-order beliefs. See [the correction record](docs/REVIEW_FIXES.md) and [validation evidence](docs/VALIDATION.md).
+The review corrections use **corpus schema v3 and shortcut audit v4**. Regenerate earlier manifests and repeat G0. The audit includes every focal-event position, location frequency, last jointly observed event, first/last/initial/cue rules, and both signs of nested/first-order relations. Remaining weak heuristics are reported as failed screens and require an explicit corpus-bound G0 decision; they are not labelled near chance. See [the correction record](docs/REVIEW_FIXES.md) and [validation evidence](docs/VALIDATION.md).
 
 ## Start here
 
@@ -17,10 +17,12 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[train,test]'
 pytest -q
-paper2 generate --output data/generated/pilot-v3
-paper2 verify-data --data data/generated/pilot-v3
+paper2 generate --output data/generated/pilot-audit-v4
+paper2 verify-data --data data/generated/pilot-audit-v4
 paper2 init-gates --output runs/review.json
 ```
+
+This is **Paper 1’s world, a new story distribution**; the eight-question scores are not directly comparable with Paper 1’s panel. [Proposal departures](docs/PROPOSAL_DEPARTURES.md) gives the design changes and limitations to disclose in the paper.
 
 The default generator writes 2,000 training worlds shared by clean and shortcut twins, 120 development worlds, and 120 confirmation worlds. Only direct-belief rows enter training. The seven other views are never rewarded. The full dataset is regenerated locally instead of checking repetitive generated artifacts into Git.
 
@@ -37,7 +39,7 @@ Every trained arm is compared with its untrained base. GRPO uses groups of eight
 
 1. **No-trace transfer:** immediate, single-token answers after `Answer:` across all eight views; ordinary task labels, preservation, cue dependence and joint correctness.
 2. **Crossed traces/readers:** both readers consume traces from both sources. Each reader's benefit is the fraction of its own baseline errors repaired, with regressions reported separately. Includes question-dependent traces and native direct-question traces frozen across later questions, raw and re-rendered own replay, a preregistered subset of reviewed edits, source-generated frozen continuations, answer cues, automatic symbolic belief summaries and no trace.
-3. **Component swaps:** within each checkpoint, critical-token keys, values and residual outputs are swapped between matched event pairs. All selected layers are swapped simultaneously per component; optional single-layer diagnostics are separate. Self-swaps, signed-permutation displacement nulls and natural donor inputs are recorded. Residual swaps are the empirical positive control. Secondary cross-model swaps require identical token prefixes.
+3. **Component swaps:** within each checkpoint, critical-token keys, values and residual outputs are swapped between matched event pairs. All selected layers are swapped simultaneously per component; optional single-layer diagnostics are separate. Self-swaps, signed-permutation displacement nulls and natural donor inputs are recorded. A preregistered interior residual band is the empirical positive control; layer-zero paths cannot certify G4. Secondary cross-model swaps require identical token prefixes.
 
 Use unconditional and development-selected matched-direct-accuracy comparisons. No-trace transfer establishes direct-answer transfer, not the location of a stored belief. Trace interactions are not reported as a fraction of training gains “stored” in text. Component results use explicit event-rewrite forecasts; Tests 1 and 2 retain ordinary task targets.
 

@@ -12,6 +12,7 @@ from .config import TrainingConfig
 from .data import TRACE_INFORMATION, answer_reward, make_rl_rows, make_sft_rows, rows_digest, validate_rows
 from .generation import TraceCapProcessor
 from .ledger import ComputeLedger
+from .resources import full_pool_projection, resource_plan
 
 PINNED = {'trl': '0.20.0', 'transformers': '4.53.2', 'peft': '0.16.0',
           'accelerate': '1.8.1', 'datasets': '3.6.0'}
@@ -52,7 +53,10 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
             start = time.perf_counter()
             result = super()._save_checkpoint(*args, **kwargs)
             _sync(torch)
-            ledger.checkpoint_seconds += time.perf_counter() - start
+            elapsed = time.perf_counter() - start
+            ledger.checkpoint_seconds += elapsed
+            ledger.resumable_checkpoint_save_seconds += elapsed
+            ledger.resumable_checkpoint_save_count += 1
             checkpoint = Path(self.args.output_dir) / f'checkpoint-{self.state.global_step}'
             if checkpoint.is_dir():
                 snapshot = ledger.to_dict()
@@ -301,6 +305,10 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         raise ValueError('Tokenizer needs an EOS token')
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    delimiter_tokens = len(tokenizer.encode('\nAnswer:', add_special_tokens=False))
+    planned_resources = resource_plan(config, len(training_rows), len(dev_rows or []), delimiter_tokens,
+                                      synthetic=synthetic)
+    evaluation_steps = set(planned_resources['evaluation_steps'])
     tokenizer.padding_side = 'left' if config.rl else 'right'
     if synthetic:
         model = synthetic_model
@@ -378,20 +386,29 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             if not dev_rows:
                 return
             # Rotation may remove resumable trainer checkpoints. Preserve a small
-            # adapter at EVERY evaluated step so matching never selects missing weights.
+            # adapter at every evaluated step so matching never selects missing weights.
             adapter = output / 'evaluated_checkpoints' / f'checkpoint-{step}'
             _sync(torch)
             start = time.perf_counter()
             trainer.save_model(str(adapter))
             tokenizer.save_pretrained(str(adapter))
             _sync(torch)
-            ledger.checkpoint_seconds += time.perf_counter() - start
+            elapsed = time.perf_counter() - start
+            ledger.checkpoint_seconds += elapsed
+            ledger.evaluated_adapter_save_seconds += elapsed
+            ledger.evaluated_adapter_save_count += 1
+            ledger.max_evaluated_adapter_bytes = max(ledger.max_evaluated_adapter_bytes,
+                                                    sum(path.stat().st_size for path in adapter.rglob('*') if path.is_file()))
             from paper2.io import file_digest
             adapter_digest = file_digest(adapter / 'adapter_model.safetensors')
             start = time.perf_counter()
             predictions = _development_predictions(trainer.model, tokenizer, dev_rows, config, torch)
             _sync(torch)
             ledger.evaluation_seconds += time.perf_counter() - start
+            ledger.evaluation_panels += 1
+            ledger.evaluation_native_generations += sum(row['format'].startswith('native_') for row in predictions)
+            ledger.evaluation_immediate_forward_calls += sum(row['format'] == 'immediate' for row in predictions)
+            ledger.evaluation_generated_tokens += sum(row.get('completion_tokens', 0) for row in predictions)
             checkpoint_id = str(adapter.resolve())
             identity = {'checkpoint_id': checkpoint_id, 'path': checkpoint_id, 'checkpoint_path': checkpoint_id,
                         'checkpoint_kind': 'base' if step == 0 else 'trained',
@@ -432,13 +449,14 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             self.evaluate(state.global_step)
 
         def on_step_end(self, args, state, control, **kwargs):
-            if state.global_step % config.eval_steps == 0 or state.global_step == resolved_max_steps:
+            ledger.completed_optimizer_steps = state.global_step
+            if state.global_step in evaluation_steps:
                 self.evaluate(state.global_step)
 
     trainer.add_callback(RecordCurve())
     trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     manifest = {'config': config.to_dict(), 'stack': versions, 'torch': torch.__version__,
-                'training_budget': budget,
+                'training_budget': budget, 'resource_plan': planned_resources,
                 'training_sha256': rows_digest(training_rows), 'training_examples': len(training_rows),
                 'trainable_parameters': trainable, 'model_revision_resolved': getattr(model.config, '_commit_hash', None),
                 'trace_supervision': TRACE_INFORMATION.get(config.trace_source) if config.arm == 'reasoning_sft' else None,
@@ -463,7 +481,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         tokenizer.save_pretrained(str(output / 'adapter'))
         trainer.save_state()
         _sync(torch)
-        ledger.checkpoint_seconds += time.perf_counter() - save_start
+        elapsed = time.perf_counter() - save_start
+        ledger.checkpoint_seconds += elapsed
+        ledger.final_adapter_save_seconds += elapsed
         manifest['train_metrics'] = result.metrics
         manifest['status'] = 'complete'
     except BaseException as error:
@@ -481,9 +501,12 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     report = ledger.to_dict()
     if config.profile or config.stage == 'profile':
-        profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget, 'model': config.model,
+        profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget,
+                   'resource_plan': planned_resources, 'model': config.model,
                    'hardware': torch.cuda.get_device_name() if torch.cuda.is_available() else 'CPU synthetic test',
                    'synthetic': synthetic, **report,
-                   'read_before_training': 'Use observed generation/update/checkpoint time, peak memory and truncation to freeze the arrangement and cost estimate.'}
+                   'full_pool_resource_projection': full_pool_projection(config, len(training_rows), len(dev_rows or []),
+                                                                         delimiter_tokens, report, synthetic=synthetic),
+                   'read_before_training': 'Review full-pool training, native development evaluation and retained snapshot storage for every arm; a short profile does not establish the pilot budget.'}
         (output / 'profile_report.json').write_text(json.dumps(profile, indent=2) + '\n')
     return {'manifest': manifest, 'compute': report, 'output_dir': str(output)}

@@ -1,4 +1,4 @@
-# Review corrections, version 0.2.0
+# Review corrections, version 0.3.0
 
 The original 72 passing tests did not establish scientific validity. The revised suite and corpus audits test the specific failure modes identified in review. This release changes the corpus and experiment protocol; old datasets, trace artifacts and frozen G0 approvals must be regenerated. No research-model result is claimed.
 
@@ -36,4 +36,12 @@ Full-layer interventions can reveal distributed effects that single-layer tests 
 
 The shared-chat OpenToM evaluation is a documented adaptation, not a claim to reproduce every published prompt. See [OpenToM protocol](OPENTOM.md). The edit subset and fixed-direct timing are documented in [trace protocol](TRACES.md).
 
-See [validation evidence](VALIDATION.md) for completed software/data checks. G0–G4 remain empirical pilot decisions; no 3B/7B training or paid compute was started by this correction.
+See [validation evidence](VALIDATION.md) for completed software/data checks. Audit v4 additionally reports weak position/frequency/last-joint-observation heuristics rather than claiming they are at chance. G0–G4 remain empirical pilot decisions; no 3B/7B training or paid compute was started by this correction.
+
+## Second review
+
+- Expanded audit v4 tests every focal-event position, focal/all-event and full-story location frequency, and the last jointly observed focal event. Known weak rules remain in this distribution; explicit corpus-bound G0 review is required.
+- G4 excludes layer-zero and final-only residual masks, and binds a measured interior positive control to raw hashed receipts and complete consequence panels. Full-depth K/V are retained.
+- RL evaluation is every 250 steps: nine panels and 1,080 native generations per run. Profiling now measures and projects development and storage costs separately.
+- Twelve edit worlds are pilot-only diagnostics. Confirmatory rate precision planning defaults to 97 worlds for approximate 95% ±.10, requires the full eight-view panel, and reports actual story intervals. Focal-edit consequences are populated by the oracle while natural-language review remains required.
+- [Proposal departures](PROPOSAL_DEPARTURES.md) supplies the distinctions the paper must state, including the new story distribution and limits on benchmark comparability.

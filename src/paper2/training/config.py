@@ -41,7 +41,7 @@ class TrainingConfig:
     temperature: float = 0.8
     top_p: float = 1.0
     logging_steps: int = 1
-    eval_steps: int = 25
+    eval_steps: int | None = None
     save_steps: int = 50
     save_total_limit: int = 6
     gradient_checkpointing: bool = True
@@ -56,6 +56,16 @@ class TrainingConfig:
             object.__setattr__(self, 'revision', MODEL_REVISIONS.get(self.model, 'synthetic'))
         if self.learning_rate is None:
             object.__setattr__(self, 'learning_rate', 1e-5 if self.rl else 1e-4)
+        if self.eval_steps is None:
+            # Native reasoning evaluation is sequential and can dominate a run.
+            # Keep sparse, retained RL snapshots; SFT has only 250 default steps.
+            object.__setattr__(self, 'eval_steps', 250 if self.rl else 25)
+
+    def evaluation_schedule(self, max_steps: int) -> list[int]:
+        """Include the base and final model, even off the regular interval."""
+        if max_steps < 1:
+            raise ValueError('Evaluation schedule needs positive optimizer steps')
+        return sorted({0, max_steps, *range(self.eval_steps, max_steps + 1, self.eval_steps)})
 
     @property
     def reasoning(self) -> bool:

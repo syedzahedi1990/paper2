@@ -90,6 +90,7 @@ def component_summary(before, after):
     """
     from collections import defaultdict
     from paper2.analysis import _seed, cluster_interval
+    from .controls import residual_control_summary
     effects = compare_checkpoints(before, after)
     clusters = defaultdict(lambda: defaultdict(list))
     for row in effects:
@@ -149,5 +150,6 @@ def component_summary(before, after):
     return {"paired_effects": effects,
             "probability_effects": {k: cluster_interval(v) for k, v in sorted(clusters.items())},
             "consequence_patterns": {k: cluster_interval(v) for k, v in sorted(pattern_clusters.items())},
+            "g4_positive_controls": {"before": residual_control_summary(before), "after": residual_control_summary(after)},
             "uncertainty": "Fixed seeds averaged within stories; paired whole-story bootstrap.",
             "forecast_account": "event_rewrite"}
