@@ -1,0 +1,16 @@
+{
+  "tests": 72,
+  "errors": 0,
+  "failures": 0,
+  "skipped": 0,
+  "seconds": 6.802,
+  "python": "3.12.14",
+  "platform": "macOS-14.7.4-arm64-arm-64bit",
+  "test_command": "pytest -q --junitxml=/tmp/paper2-final-tests.xml",
+  "lint": "ruff check src/paper2 tests: passed",
+  "dependency_check": "pip check: no broken requirements",
+  "research_model_training_run": false,
+  "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
+  "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
+  "scope": "CPU unit and real tiny-random-Qwen integration; no 3B/7B calibration, training, empirical gate or research-result claims"
+}

@@ -1,0 +1,117 @@
+{
+  "compute": "CPU data generation and tokenizer checks only; no model weights or training",
+  "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
+  "corpus_schema_version": "paper2.corpus.v2",
+  "cue_agreement_with_evaluated_target": {
+    "agree/direct": 1.0,
+    "agree/irrelevant_object": 0.14583333333333334,
+    "agree/observed_overwrite": 0.0,
+    "agree/other_agent": 0.5,
+    "agree/report": 1.0,
+    "agree/search": 1.0,
+    "agree/unobserved_overwrite": 1.0,
+    "agree/world": 0.5,
+    "clean/direct": 0.17916666666666667,
+    "clean/irrelevant_object": 0.17083333333333334,
+    "clean/observed_overwrite": 0.18333333333333332,
+    "clean/other_agent": 0.19166666666666668,
+    "clean/report": 0.17916666666666667,
+    "clean/search": 0.17916666666666667,
+    "clean/unobserved_overwrite": 0.17916666666666667,
+    "clean/world": 0.1625,
+    "conflict/direct": 0.0,
+    "conflict/irrelevant_object": 0.17083333333333334,
+    "conflict/observed_overwrite": 0.2,
+    "conflict/other_agent": 0.1,
+    "conflict/report": 0.0,
+    "conflict/search": 0.0,
+    "conflict/unobserved_overwrite": 0.0,
+    "conflict/world": 0.1,
+    "independent/direct": 0.16666666666666666,
+    "independent/irrelevant_object": 0.16666666666666666,
+    "independent/observed_overwrite": 0.16666666666666666,
+    "independent/other_agent": 0.16666666666666666,
+    "independent/report": 0.16666666666666666,
+    "independent/search": 0.16666666666666666,
+    "independent/unobserved_overwrite": 0.16666666666666666,
+    "independent/world": 0.16666666666666666
+  },
+  "cue_design": {
+    "agree": 1.0,
+    "agreement_reference": "Rewarded direct-belief target of the underlying world, fixed across all eight views",
+    "analysis_unit": "Average cue variants within world/view, then aggregate stories",
+    "clean_training_agreement": 0.167,
+    "conflict": 0.0,
+    "heldout_variants_per_world_view": {
+      "agree": 1,
+      "clean": 1,
+      "conflict": 5,
+      "independent": 6
+    },
+    "independent": 0.16666666666666666,
+    "joint_group_by": [
+      "world_id",
+      "cue_condition",
+      "cue_location"
+    ],
+    "matching": "Exact character/word length and entity frequencies; tokenizer audit separately required",
+    "same_inventory_order_across_views": true,
+    "shortcut_training_agreement": 0.9
+  },
+  "heldout_renderings_checked": 24960,
+  "ordinary_targets_vs_rewrites": "Separate; all 8 ordinary targets and six source accounts match v5.5 at depth1; depth2 targets replay unchanged original state engine",
+  "qwen3b_heldout_tokenizer_audit": {
+    "groups": 1920,
+    "mismatched_groups": [],
+    "passed": true,
+    "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
+  },
+  "qwen3b_training_twins_tokenizer_audit": {
+    "groups": 2000,
+    "mismatched_groups": [],
+    "passed": true,
+    "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
+  },
+  "source_consistency_comparisons": 10400,
+  "source_provenance": {
+    "consequence_source": "v5.5-reviewer-repository/gpu/consequence_task.py",
+    "consequence_source_sha256": "c872a4ce083ae569ddc152ea5f19a1ae1e92cea4de016e5be68121ed62512789",
+    "dataset_reuse": "Paper 2 regenerates disjoint story splits using the original state engine and vocabulary; no Paper 1 results are reused as Paper 2 results",
+    "generator_modification": "None; byte-identical copy from the owner's local v5.5 experiment bundle",
+    "generator_sha256": "069e6381432f7221a279afc05357c7d672da7195fbb12adbe1f4d4cc214a9857",
+    "generator_source": "v55-main-experiments-bundle/candidate_01/v5.5_main_experiments/experiments/qwen_original_primary/code_snapshot/tom_epistemic_generator.py",
+    "generator_vendored_path": "src/paper2/data/_vendor/tom_epistemic_generator.py",
+    "reference_dataset": "v5.5-reviewer-repository/gpu/behavior_data/datasets.json.gz",
+    "reference_dataset_sha256": "c3c3027bd57a5ec4a28df7975e0d9820fd5f67ff4c1739aefdb34540524002b1",
+    "related_release_commit": "a89e6e643410b14055ef8cf746ac609b80ade0f4",
+    "related_release_repository": "https://github.com/syedzahedi1990/Beyond-the-fitted-Scope---Causal-keys",
+    "rights": "Source belongs to the same requesting repository owner. Upstream says a distribution license has not yet been selected. No new license is asserted here.",
+    "story_task_source": "v5.5-reviewer-repository/gpu/runtime/story_task.py",
+    "story_task_source_sha256": "0f537050bd183ea15f60eef0a4e482a4984ae2a9be1f338c4c734c42596f5cb4"
+  },
+  "verification": {
+    "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
+    "family_overlap": 0,
+    "files": 17,
+    "rendered_story_overlap": 0,
+    "story_counts": {
+      "confirmation": 120,
+      "development": 120,
+      "train": 2000
+    },
+    "verified": true,
+    "world_overlap": 0
+  },
+  "world_level_cue_joint_audit": {
+    "agreement_reference": "direct belief only",
+    "all_groups_have_exactly_eight_views": true,
+    "base_story_and_inventory_fixed_across_views": true,
+    "group_by": [
+      "world_id",
+      "cue_condition",
+      "cue_location"
+    ],
+    "groups": 3120,
+    "passed": true
+  }
+}

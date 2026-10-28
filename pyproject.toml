@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper2-reasoning-rl"
+version = "0.1.0"
+description = "Paper 2: What Does Reasoning RL Change in Belief Tracking?"
+requires-python = ">=3.10,<3.14"
+dependencies = ["numpy>=1.26,<3"]
+
+[project.optional-dependencies]
+model = ["torch==2.7.1", "transformers==4.53.2", "peft==0.16.0", "accelerate==1.8.1"]
+train = ["torch==2.7.1", "transformers==4.53.2", "peft==0.16.0", "accelerate==1.8.1", "trl==0.20.0", "datasets==3.6.0"]
+test = ["pytest>=8,<9", "ruff>=0.11"]
+
+[project.scripts]
+paper2 = "paper2.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["integration: real small CPU model integration, no pretrained weights"]
+
+[tool.ruff]
+line-length = 110
+extend-exclude = ["src/paper2/data/_vendor"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"tests/*.py" = ["E402"]
