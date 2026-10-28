@@ -1,6 +1,6 @@
-# Review corrections, version 0.3.0
+# Review corrections, version 0.4.0
 
-The original 72 passing tests did not establish scientific validity. The revised suite and corpus audits test the specific failure modes identified in review. This release changes the corpus and experiment protocol; old datasets, trace artifacts and frozen G0 approvals must be regenerated. No research-model result is claimed.
+The original 72 passing tests did not establish scientific validity. The revised suite and corpus audits test the specific failure modes identified in review. Earlier corrections changed the corpus; this release updates edit generation, evaluation cadence and G4 band binding without changing corpus schema v3/audit v4. Artifacts from older corpus schemas remain invalid, and new protocol settings require a new frozen experiment lineage. No research-model result is claimed.
 
 | Review finding | Correction |
 |---|---|
@@ -13,11 +13,11 @@ The original 72 passing tests did not establish scientific validity. The revised
 | H3 pooled incompatible consequences | CLI reports required changes, intact answers and joint consequence patterns, plus per-view probability contrasts and changes relative to own controls |
 | Reader-specific regenerated traces | Source generates and saves a continuation once; both readers consume the same hashed artifact; analysis rejects differing supplied text |
 | Novel untrained prequestion prompt | Native direct-question trace is frozen across later views (`direct_fixed`); old `prequestion` name is an explicit alias |
-| Excessive manual edits | Seeded, preregistered world subset (default 12); shared traces use one contract; symbolic belief summaries are automatic |
+| Excessive manual edits | Pilot subset defaults to 12 worlds; precision-sized confirmatory edits require `direct_fixed`, one contract per world/source. A fixed preregistered model generates paraphrases and irrelevant edits, with oracle fact proposals and a preregistered random human batch audit |
 | Own replay tautology | Exact-prefix replay retained as a low-level control; re-rendered replay, prefix-token equality and eligibility reported separately |
 | G1 measured wrong format | Native-format and immediate development curves, matched native base, and machine-readable G1 evidence |
 | Insufficient RL exposure | Default full-pool pass with actual distinct-world coverage; RL groups and SFT exposures are recorded separately; provisional arm-specific learning rates remain configurable |
-| Missing accuracy-matched adapters | Adapter retained at every evaluated step; training emits matching records with weights hash; selection grouped by arm/dataset/seed and missing matches retained explicitly |
+| Missing or coarsely spaced accuracy-matched adapters | RL immediate evaluation and retained adapters every 50 steps; native generation every 250. Matching records retain weights hashes and arm/dataset/seed; the ±0.02 tolerance is unchanged and missing matches remain explicit |
 | Seeds omitted from analysis | Paired fixed seeds averaged within story before bootstrap; missing seed panels rejected; crossed reader/source/comparison seed identities separated |
 | Cue contrast pooled across views | Direct and per-view paired contrasts are primary outputs; pooled direct-anchored manipulation effect labelled separately; literal cues stay fixed across views |
 | OpenToM exact-match mismatch | Question/plot-derived options and type-specific scoring, upstream-compatible diagnostics, raw outputs and explicit prompt/scoring adaptations |
@@ -38,10 +38,18 @@ The shared-chat OpenToM evaluation is a documented adaptation, not a claim to re
 
 See [validation evidence](VALIDATION.md) for completed software/data checks. Audit v4 additionally reports weak position/frequency/last-joint-observation heuristics rather than claiming they are at chance. G0–G4 remain empirical pilot decisions; no 3B/7B training or paid compute was started by this correction.
 
-## Second review
+## Second review, version 0.3
 
 - Expanded audit v4 tests every focal-event position, focal/all-event and full-story location frequency, and the last jointly observed focal event. Known weak rules remain in this distribution; explicit corpus-bound G0 review is required.
-- G4 excludes layer-zero and final-only residual masks, and binds a measured interior positive control to raw hashed receipts and complete consequence panels. Full-depth K/V are retained.
-- RL evaluation is every 250 steps: nine panels and 1,080 native generations per run. Profiling now measures and projects development and storage costs separately.
+- G4 excluded layer-zero and final-only residual masks, and bound a measured interior positive control to raw hashed receipts and complete consequence panels. Version 0.4 adds exact alignment with the declared K/V test band.
+- Native RL evaluation was reduced to every 250 steps: nine panels and 1,080 native generations per run. Version 0.4 retains that schedule while adding denser immediate evaluation and adapter retention.
 - Twelve edit worlds are pilot-only diagnostics. Confirmatory rate precision planning defaults to 97 worlds for approximate 95% ±.10, requires the full eight-view panel, and reports actual story intervals. Focal-edit consequences are populated by the oracle while natural-language review remains required.
 - [Proposal departures](PROPOSAL_DEPARTURES.md) supplies the distinctions the paper must state, including the new story distribution and limits on benchmark comparability.
+
+## Third review, version 0.4
+
+- G4 requires an explicitly preregistered test band, passed as `--g4-test-layers` and recorded in frozen `settings.g4_test_layers`. K, V and residual are measured on that same band, including its first layer. Gate evidence must select the identical `test_layers` and provide complete same-band natural/own/null receipts. Arbitrary interior singles and the legacy residual-only diagnostic flag cannot certify another band. Full-depth diagnostics remain available; the positive control validates only its declared band.
+- RL measures immediate accuracy and saves adapters at 0, 50, …, 2,000: 41 matching snapshots. Native traces remain at 0, 250, …, 2,000: nine panels. Profiling records the formats separately and includes added adapter storage. This improves matching resolution without guaranteeing a ±0.02 match or a whole-pilot compute budget.
+- Confirmatory edits require one frozen direct-question trace per world/source, projected across all eight views. With 97 worlds and 24 trained checkpoints plus one shared base, one rendering requires 2,425 contracts, rather than 19,400 question-dependent contracts. Matched checkpoints and extra renderings increase these counts.
+- A fixed editor model/revision, prompt, decoding policy and token budget generates paraphrases, irrelevant edits and exact spans for oracle-proposed fact changes. Generation happens once, with hashed inputs, raw outputs and a resumable journal. A preregistered random human sample, supplemented for source/checkpoint coverage, audits the batch under a fixed acceptance rule. Unsampled controls remain individually unapproved; unresolved or failed batches cannot be silently dropped or repeatedly resampled.
+- [The edit-generation protocol](EDIT_GENERATION.md) documents the method, audit limits and relation to Lanham et al. Model assistance removes mandatory manual authoring of every contract; no claim that the four-week experiment schedule is sufficient follows from the implementation.

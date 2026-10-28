@@ -14,15 +14,15 @@ The proposal is the design authority. Values it leaves unspecified are implement
 | Native and immediate format evaluation | `evaluation.py`, `backend.py`, `prompts.py` | Full-vocabulary argmax primary; restricted-choice result retained only as diagnostic |
 | H1 no-trace transfer | `analysis.py:transfer` | Paired story bootstrap, unrewarded views, scope split, preservation |
 | H1 crossed sources and readers | `traces.py`, `analysis.py:crossed_summary` | Per-reader remaining-error denominator; ceiling -> undefined, regressions separate |
-| Replay and seven controls | `traces.py` | Raw-prefix and re-rendered replay separately; deterministic world subset, deduplicated contracts, automatic symbolic summaries |
+| Replay and seven controls | `traces.py`, `edit_generation.py` | Raw-prefix and re-rendered replay separately; deterministic world subset, deduplicated contracts, automatic symbolic summaries; fixed editor generates controls with preregistered sampled human review |
 | Minimal edit plus regenerated continuation | `traces.py:regenerate_trace_artifacts` | Source generates once; both readers consume the same hashed frozen continuation |
-| Trace before later questions | `traces.py:collect_traces` | One native direct-question trace fixed across later views; future events excluded |
+| Trace before later questions | `traces.py:collect_traces` | One native direct-question trace fixed across later views; primary confirmatory edits require `direct_fixed`; future events excluded |
 | H2 cue dependence and joint outcomes | `analysis.py:cue_summary`, `accuracy_summary` | Balanced replicas averaged within world/view; all eight views required for joint score |
-| Matched direct accuracy | `analysis.py:match_checkpoints` | Saved adapter at every evaluation; direct records emitted; matching grouped by arm/dataset/seed |
-| H3 K/V/residual swaps and controls | `interventions/components.py`, `runner.py`, `scoring.py` | Real GQA/RoPE tiny-Qwen tests; empirical G4 effects still pending |
+| Matched direct accuracy | `analysis.py:match_checkpoints`, `training/config.py` | RL immediate evaluation/adapters every 50 steps, native every 250; matching grouped by arm/dataset/seed with unchanged ±0.02 tolerance and explicit unmatched runs |
+| H3 K/V/residual swaps and controls | `interventions/components.py`, `runner.py`, `controls.py`, `scoring.py` | G4 requires complete K/V/residual panels on the exact declared band, bound to frozen settings; real GQA/RoPE tiny-Qwen tests; empirical effects still pending |
 | Within-model primary, cross-model secondary | `ComponentInterventionEngine.swap` | Cross-model prefix identity enforced; explicit secondary CLI donor; identical full inputs and answer alphabets; excluded from primary analysis |
 | OpenToM external check | `opentom.py` | Pinned flat QA schema, question-type options and scoring; documented prompt adaptation and upstream diagnostics |
-| Profiling and compute reporting | `training/ledger.py`, `training/runner.py` | Actual counters/timers and manifests; practical GPU timings pending |
+| Profiling and compute reporting | `training/ledger.py`, `training/runner.py`, `edit_generation.py` | Separate native/immediate evaluation timers and retained-adapter storage; edit plans record calls and token cap; practical GPU timings and whole-study budget remain pending |
 | G0–G4 and paid-run review | `gates.py`, `docs/PROTOCOL.md` | All gates initially pending; schema-v3/audit-v4 screens and explicit remaining-heuristic review before G0; evidence hashes checked |
 | Conditional Bridge follow-on | No Bridge experiment implemented | Separate proposal and its decision rule required; no calendar-triggered launch |
 
@@ -34,10 +34,10 @@ The proposal's figure gives four **candidate readings** (trace-dependent gain; t
 - LoRA uses rank 16, alpha 32, dropout 0, all attention and MLP projection modules. Direct Q/K/V updates are therefore part of the treatment and must be stated when reading Test 3.
 - Initial training settings are in JSON, with a full training-pool pass, arm-specific provisional learning rates and a constant schedule with warmup. These are pilot settings, not established sufficient convergence.
 - Default data mixes depths 1 and 2 and move/communication events. Difficulty controls include distractor events and hidden moves. Recalibrate on development data once if needed, then freeze.
-- Test 3 layers must be supplied explicitly. The proposal does not specify layers; choose and freeze them during implementation/profiling, before looking at confirmatory outcomes.
-- Semantic/paraphrase controls require content review. Automatic string substitution cannot establish that a free-form model trace changed only one fact; the edit manifest records offsets, exact old/new text, the fact and predictions, and a reviewer. Basic crossed runs can run before this review, but cannot satisfy G3.
+- Test 3 layers must be supplied explicitly. The proposal does not specify layers; choose and freeze them before confirmatory outcomes. `--g4-test-layers` measures K/V/residual on one declared contiguous interior band, matching frozen `settings.g4_test_layers`; a different residual mask cannot certify it. Full-depth and single-layer diagnostics remain separate.
+- Semantic/paraphrase controls require content review. Machine checks cannot establish that a free-form model trace changed only one fact. The confirmatory protocol freezes an editor model/revision and prompt, generates controls once around oracle-proposed edits, and requires a preregistered random human sample audit with source/checkpoint coverage. Unsampled contracts are not individually approved. Primary confirmatory edits reuse `direct_fixed` traces; question-dependent edits remain supplemental. See [the edit-generation protocol](EDIT_GENERATION.md).
 - Numerical pilot thresholds are not invented as proposal requirements. Record the intended effect/precision criteria during calibration and have the named gate reviewer judge the measured evidence.
 
 ## Deliberate departures
 
-See [the manuscript disclosure record](PROPOSAL_DEPARTURES.md) for the changed story distribution, remaining weak heuristics, precision-sized confirmatory edits, oracle-premise control, evaluation-cost reduction, optimization differences and adapted OpenToM scoring. These are changes to disclose, not claims that the original proposal specified them.
+See [the manuscript disclosure record](PROPOSAL_DEPARTURES.md) for the changed story distribution, remaining weak heuristics, precision-sized confirmatory edits and their sampled review, oracle-premise control, separate immediate/native schedules, optimization differences and adapted OpenToM scoring. These are changes to disclose, not claims that the original proposal specified them.

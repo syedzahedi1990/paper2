@@ -1,0 +1,393 @@
+"""Model output is a candidate; a frozen random human audit grants batch use."""
+from copy import deepcopy
+import json
+import random
+
+import pytest
+
+from paper2.data.world import generate_world, render_record
+from paper2.edit_generation import (CHECKS, CONTROL_PROMPT, generate_edit_controls,
+                                    prepare_batch_audit, prepare_generation_plan,
+                                    validate_batch_audit, validate_generated_batch)
+from paper2.io import digest
+from paper2.traces import prepare_edit_manifest, symbolic_edit_prediction, validate_edit
+
+
+REVISION = "a" * 40
+
+
+def fixture(worlds=2, sources=2):
+    rows, traces = [], []
+    for seed in range(worlds):
+        row = render_record(generate_world(random.Random(seed)), "direct")
+        rows.append(row)
+        premise = symbolic_edit_prediction(row)["fact_before"]
+        text = premise + ". Then we can consider the events."
+        for number in range(sources):
+            source = f"source-{number}"
+            checkpoint = {"id": source, "revision": "b" * 40}
+            artifact = digest([source, checkpoint, row["id"], "direct_fixed", digest(text)])
+            traces.append({"schema_version": 2, "artifact_id": artifact,
+                           "trace_id": digest([artifact, row["id"]]), "source": source,
+                           "source_checkpoint": checkpoint, "basis_record_id": row["id"],
+                           "record_id": row["id"], "world_id": row["world_id"], "view": "direct",
+                           "question_timing": "direct_fixed", "trace": text, "trace_sha256": digest(text)})
+    manifest = prepare_edit_manifest(traces, rows, max_worlds=worlds)
+    plan = prepare_generation_plan(manifest, model_id="fixed-editor", revision=REVISION,
+                                   audit_sample_size=2)
+    return traces, manifest, plan
+
+
+class Editor:
+    checkpoint_id = "fixed-editor"
+    revision = REVISION
+
+    class tokenizer:
+        chat_template = "<user>{{ user_content }}</user><assistant>"
+
+        @staticmethod
+        def apply_chat_template(messages, *, tokenize, add_generation_prompt):
+            assert tokenize is False and add_generation_prompt is True
+            assert len(messages) == 1 and messages[0]["role"] == "user"
+            return "<user>" + messages[0]["content"] + "</user><assistant>"
+
+    def __init__(self, mutate=None):
+        self.calls = []
+        self.mutate = mutate
+
+    def generate(self, prompt, **decoding):
+        self.calls.append((prompt, decoding))
+        assert prompt.startswith("<user>" + CONTROL_PROMPT) and prompt.endswith("</user><assistant>")
+        payload = json.loads(prompt[len("<user>" + CONTROL_PROMPT):-len("</user><assistant>")])
+        trace, before, after = payload["trace"], payload["old_location"], payload["new_location"]
+        start = trace.index(before)
+        irrelevant = trace.index("Then")
+        output = {"paraphrase": trace.replace("Then we can", "Next we may"),
+                  "semantic": {"start": start, "end": start + len(before), "old": before, "new": after},
+                  "irrelevant": {"start": irrelevant, "end": irrelevant + 4, "old": "Then", "new": "Next"}}
+        if self.mutate:
+            output = self.mutate(output)
+        return {"text": output if isinstance(output, str) else json.dumps(output),
+                "truncated": False, "tokens": 100, "seed": decoding["seed"]}
+
+
+def approved_audit(batch):
+    audit = prepare_batch_audit(batch)
+    for item in audit["items"]:
+        item["reviewed_by"] = "Human reviewer"
+        item["checks"] = {check: True for check in CHECKS}
+    audit["accepted"], audit["accepted_by"] = True, "Human investigator"
+    return audit
+
+
+def rehash_batch(batch):
+    evidence = batch["generated_batch"]
+    evidence["contract_content_sha256"] = digest(batch["edits"])
+    evidence["batch_sha256"] = digest({key: value for key, value in evidence.items() if key != "batch_sha256"})
+
+
+def test_generation_freezes_model_prompt_oracle_and_never_claims_semantic_approval():
+    traces, manifest, plan = fixture()
+    editor, journal = Editor(), []
+    batch = generate_edit_controls(editor, traces, manifest, plan, on_result=journal.append)
+    assert len(editor.calls) == len(journal) == 4
+    assert validate_generated_batch(batch)
+    for contract, template in zip(batch["edits"], manifest["edits"]):
+        assert contract["generation_status"] == "ready"
+        assert contract["approved"] is False and contract["reviewed_by"] is None
+        assert contract["paraphrase"]["meaning_preserved"] is False
+        assert contract["semantic"]["only_intended_fact_changed"] is False
+        assert contract["semantic"]["expected_answers"] == template["semantic"]["expected_answers"]
+        assert contract["semantic"]["oracle"] == template["semantic"]["oracle"]
+        assert "expected_answers" not in contract["generation"]["input"]
+        assert contract["generation"]["model"] == plan["model"]
+        assert contract["generation"]["prompt_format"] == "single_user_chat_v1"
+        assert contract["generation"]["prompt"].startswith("<user>")
+    assert all(decode["do_sample"] is False for _, decode in editor.calls)
+    assert digest(manifest) == plan["input_manifest_sha256"]
+    assert plan["resource_counts"]["contract_generations"] == 4
+    assert plan["resource_counts"]["max_output_tokens"] == 4 * plan["decoding"]["max_new_tokens"]
+
+
+def test_audit_sample_is_fixed_before_generation_and_covers_every_checkpoint():
+    traces, manifest, plan = fixture(worlds=2, sources=12)
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    audit = prepare_batch_audit(batch)
+    assert [item["artifact_id"] for item in audit["items"]] == plan["audit"]["sample_artifact_ids"]
+    assert len(plan["audit"]["uniform_artifact_ids"]) == 2
+    assert len({item["source"] for item in audit["items"]}) == 12
+    assert audit["sample_size"] <= 14  # Global sample plus missing sources, not 60 per source.
+    assert "Uniform random audit seed" in plan["audit"]["design_detection"]["assumptions"]
+    assert prepare_batch_audit(batch) == audit
+
+
+def test_batch_acceptance_binds_every_contract_without_individual_approval():
+    traces, manifest, plan = fixture()
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    approval = validate_batch_audit(batch, approved_audit(batch))
+    assert approval["approved_contract_hashes"] == {
+        contract["artifact_id"]: digest(contract) for contract in batch["edits"]}
+    assert approval["sample_size"] <= approval["population_size"]
+    assert all(contract["approved"] is False for contract in batch["edits"])
+    trace_index = {trace["artifact_id"]: trace for trace in traces}
+    for contract in batch["edits"]:
+        validate_edit(trace_index[contract["artifact_id"]], contract, batch_review=approval)
+    with pytest.raises(ValueError, match="human reviewer"):
+        validate_batch_audit(batch, prepare_batch_audit(batch))
+
+
+@pytest.mark.parametrize("mutation", ["failed_check", "missing_check", "missing_item", "changed_sample",
+                                       "no_acceptance", "no_reviewer"])
+def test_human_audit_rejects_failed_missing_or_substituted_checks(mutation):
+    traces, manifest, plan = fixture(worlds=5)
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    audit = approved_audit(batch)
+    if mutation == "failed_check":
+        audit["items"][0]["checks"][CHECKS[0]] = False
+    elif mutation == "missing_check":
+        del audit["items"][0]["checks"][CHECKS[0]]
+    elif mutation == "missing_item":
+        audit["items"].pop()
+    elif mutation == "changed_sample":
+        audit["items"][0]["artifact_id"] = "different"
+    elif mutation == "no_acceptance":
+        audit["accepted"] = False
+    else:
+        audit["items"][0]["reviewed_by"] = " "
+    with pytest.raises(ValueError):
+        validate_batch_audit(batch, audit)
+
+
+@pytest.mark.parametrize("mutation", ["invalid_json", "missing_fact", "answer_leak", "wrong_span",
+                                       "extra_fact", "overlap", "duplicate_key"])
+def test_invalid_model_outputs_are_retained_and_block_the_whole_batch(mutation):
+    def mutate(output):
+        if mutation == "invalid_json":
+            return "```json\n{}\n```"
+        if mutation == "missing_fact":
+            return {"unresolved": "The focal belief is not stated."}
+        if mutation == "answer_leak":
+            output["paraphrase"] += "\nAnswer: A"
+        elif mutation == "wrong_span":
+            output["semantic"]["start"] += 1
+        elif mutation == "extra_fact":
+            output["semantic"]["new"] += " and Bob knows"
+        elif mutation == "overlap":
+            output["irrelevant"] = deepcopy(output["semantic"])
+        elif mutation == "duplicate_key":
+            return '{"paraphrase":"first","paraphrase":"second"}'
+        return output
+
+    traces, manifest, plan = fixture(worlds=1, sources=1)
+    batch = generate_edit_controls(Editor(mutate), traces, manifest, plan)
+    contract = batch["edits"][0]
+    assert contract["generation_status"] == "unresolved"
+    assert contract["generation"]["raw_output"]
+    assert contract["generation"]["errors"]
+    assert len(batch["edits"]) == len(manifest["edits"])
+    with pytest.raises(ValueError, match="unresolved"):
+        prepare_batch_audit(batch)
+
+
+@pytest.mark.parametrize("mutation", ["wrong_model", "wrong_revision", "changed_template", "changed_plan"])
+def test_bindings_fail_before_any_inference(mutation):
+    traces, manifest, plan = fixture()
+    editor = Editor()
+    if mutation == "wrong_model":
+        editor.checkpoint_id = "other-editor"
+    elif mutation == "wrong_revision":
+        editor.revision = "main"
+    elif mutation == "changed_template":
+        manifest["edits"][0]["semantic"]["fact_after"] += " changed"
+    else:
+        plan["decoding"]["max_new_tokens"] += 1
+    with pytest.raises(ValueError):
+        generate_edit_controls(editor, traces, manifest, plan)
+    assert editor.calls == []
+
+
+def test_plan_rejects_mutable_revision_and_post_generation_registration():
+    traces, manifest, plan = fixture()
+    with pytest.raises(ValueError, match="immutable"):
+        prepare_generation_plan(manifest, model_id="editor", revision="main")
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    with pytest.raises(ValueError, match="before populating"):
+        prepare_generation_plan(batch, model_id="editor", revision=REVISION)
+
+
+def test_changing_any_contract_invalidates_prior_sample_audit():
+    traces, manifest, plan = fixture()
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    audit = approved_audit(batch)
+    batch["edits"][-1]["paraphrase"]["text"] += " altered"
+    with pytest.raises(ValueError, match="content"):
+        validate_batch_audit(batch, audit)
+    rehash_batch(batch)
+    with pytest.raises(ValueError, match="frozen model output"):
+        validate_batch_audit(batch, audit)
+
+
+def test_relabeling_machine_outputs_as_individually_reviewed_is_rejected():
+    traces, manifest, plan = fixture()
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    batch["edits"][0]["approved"] = True
+    rehash_batch(batch)
+    with pytest.raises(ValueError, match="individual human approval"):
+        validate_generated_batch(batch)
+
+
+def test_resume_uses_exact_frozen_outputs_without_regenerating_them():
+    traces, manifest, plan = fixture()
+    journal = []
+    original = generate_edit_controls(Editor(), traces, manifest, plan, on_result=journal.append)
+    resumed, emitted = Editor(), []
+    batch = generate_edit_controls(resumed, traces, manifest, plan,
+                                    completed_results=journal[:2], on_result=emitted.append)
+    assert len(resumed.calls) == len(emitted) == 2
+    assert batch == original
+    with pytest.raises(ValueError, match="duplicate"):
+        generate_edit_controls(Editor(), traces, manifest, plan, completed_results=journal + journal[:1])
+    changed = deepcopy(journal[:1])
+    changed[0]["generation"]["raw_output"] += " "
+    editor = Editor()
+    with pytest.raises(ValueError, match="Generation record hash"):
+        generate_edit_controls(editor, traces, manifest, plan, completed_results=changed)
+    assert editor.calls == []
+
+
+def test_resume_does_not_retry_unresolved_outputs():
+    traces, manifest, plan = fixture()
+    unresolved = generate_edit_controls(Editor(lambda _: {"unresolved": "No focal premise"}), traces, manifest, plan)
+    editor = Editor()
+    batch = generate_edit_controls(editor, traces, manifest, plan, completed_results=unresolved["edits"])
+    assert editor.calls == []
+    assert batch == unresolved
+    with pytest.raises(ValueError, match="unresolved"):
+        prepare_batch_audit(batch)
+
+
+def test_inference_failure_is_recorded_without_dropping_contracts():
+    class FailedEditor(Editor):
+        def generate(self, *args, **kwargs):
+            raise RuntimeError("inference unavailable")
+
+    traces, manifest, plan = fixture()
+    batch = generate_edit_controls(FailedEditor(), traces, manifest, plan)
+    assert batch["generated_batch"]["ready_count"] == 0
+    assert len(batch["edits"]) == 4
+    assert all(c["generation"]["errors"] == ["RuntimeError: inference unavailable"] for c in batch["edits"])
+    editor = Editor()
+    assert generate_edit_controls(editor, traces, manifest, plan, completed_results=batch["edits"]) == batch
+    assert editor.calls == []
+
+
+def test_returned_prompt_tokens_must_match_frozen_native_prompt():
+    class WrongPromptEditor(Editor):
+        @staticmethod
+        def token_ids(text):
+            return list(text.encode())
+
+        def generate(self, prompt, **decoding):
+            result = super().generate(prompt, **decoding)
+            result["prompt_ids"] = self.token_ids("different prompt")
+            return result
+
+    traces, manifest, plan = fixture(worlds=1, sources=1)
+    batch = generate_edit_controls(WrongPromptEditor(), traces, manifest, plan)
+    assert batch["edits"][0]["generation_status"] == "unresolved"
+    assert "prompt tokens" in batch["edits"][0]["generation"]["errors"][0]
+
+
+def test_audited_batch_runs_both_readers_on_same_controls_and_source_regeneration():
+    from paper2.backend import Answer
+    from paper2.prompts import render_prompt
+    from paper2.traces import regenerate_trace_artifacts, run_crossed_reader
+
+    class Reader:
+        class tokenizer:
+            @staticmethod
+            def apply_chat_template(messages, **kwargs):
+                return "\n".join(message["content"] for message in messages) + "\nAssistant:"
+        revision = "b" * 40
+
+        def __init__(self, checkpoint):
+            self.checkpoint_id = checkpoint
+            self.generated = 0
+
+        def token_ids(self, text):
+            return list(text.encode())
+
+        def answer(self, prompt, choices, prefix_ids=None):
+            return Answer("A", 65, "A", "A", {})
+
+        def generate(self, prompt, **kwargs):
+            self.generated += 1
+            return {"text": ". The narration continues.\nAnswer:", "truncated": False, "tokens": 7}
+
+    traces, manifest, plan = fixture()
+    rows = [render_record(generate_world(random.Random(seed)), "direct") for seed in range(2)]
+    records = {row["id"]: row for row in rows}
+    # Reader prompts use the ordinary system/user formatter.
+    for trace in traces:
+        trace.update(forced_delimiter=False, replay_eligible=False,
+                     generation_prompt=render_prompt(Reader.tokenizer, records[trace["record_id"]], reasoning=True))
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    audit = approved_audit(batch)
+    readers = [Reader("source-0"), Reader("source-1")]
+    with pytest.raises(ValueError, match="completed preregistered sample audit"):
+        list(run_crossed_reader(readers[0], rows, traces, "source-0", batch,
+                                conditions=("semantic_minimal",)))
+    frozen = [item for backend in readers for item in regenerate_trace_artifacts(
+        backend, rows, traces, backend.checkpoint_id, batch, edit_audit=audit)]
+    assert [reader.generated for reader in readers] == [2, 2]
+    conditions = ("paraphrase", "irrelevant", "semantic_minimal", "semantic_regenerated")
+    outputs = [list(run_crossed_reader(backend, rows, traces, backend.checkpoint_id, batch,
+                                      conditions=conditions, regenerated=frozen, edit_audit=audit))
+               for backend in readers]
+    assert [reader.generated for reader in readers] == [2, 2]  # Reading never regenerates anything.
+    assert [row["supplied_trace"] for row in outputs[0]] == [row["supplied_trace"] for row in outputs[1]]
+    assert all(row["edit_review_mode"] == "sampled_model_generated" for row in outputs[0])
+    assert all(row["edit_audit_sha256"] == digest(audit) for row in outputs[0])
+    changed_audit = deepcopy(audit)
+    changed_audit["items"][0]["notes"] = "Changed review record after regeneration"
+    with pytest.raises(ValueError, match="different edit audit"):
+        list(run_crossed_reader(readers[0], rows, traces, "source-0", batch,
+             conditions=("semantic_regenerated",), regenerated=frozen, edit_audit=changed_audit))
+
+
+def test_cli_generation_audit_and_journal_recovery(tmp_path, monkeypatch):
+    from paper2.cli import main
+    from paper2.io import read_jsonl, write_json, write_jsonl
+    traces, manifest, _ = fixture()
+    templates, source = tmp_path / "templates.json", tmp_path / "traces.jsonl"
+    plan_path, batch_path = tmp_path / "plan.json", tmp_path / "batch.json"
+    audit_path, evidence_path = tmp_path / "audit.json", tmp_path / "evidence.json"
+    write_json(templates, manifest)
+    write_jsonl(source, traces)
+    assert main(["plan-edit-generation", "--edits", str(templates), "--model", "fixed-editor",
+                 "--revision", REVISION, "--audit-sample-size", "2", "--output", str(plan_path)]) == 0
+    with pytest.raises(ValueError, match="already exists"):
+        main(["plan-edit-generation", "--edits", str(templates), "--model", "fixed-editor",
+              "--revision", REVISION, "--output", str(plan_path)])
+    editor = Editor()
+    monkeypatch.setattr("paper2.backend.HFBackend", lambda *_, **__: editor)
+    command = ["generate-edits", "--edits", str(templates), "--plan", str(plan_path),
+               "--traces", str(source), "--output", str(batch_path)]
+    # Seed a valid partially completed journal, as after a process interruption.
+    completed = generate_edit_controls(Editor(), traces, manifest, json.loads(plan_path.read_text()))
+    write_jsonl(str(batch_path) + ".journal.jsonl", completed["edits"][:1])
+    with pytest.raises(ValueError, match="requires --resume"):
+        main(command)
+    assert main(command + ["--resume"]) == 0
+    assert len(editor.calls) == 3
+    assert len(read_jsonl(str(batch_path) + ".journal.jsonl")) == 4
+    batch = json.loads(batch_path.read_text())
+    assert batch == completed
+    assert main(["prepare-edit-audit", "--edits", str(batch_path), "--output", str(audit_path)]) == 0
+    with pytest.raises(ValueError, match="human reviewer"):
+        main(["verify-edit-audit", "--edits", str(batch_path), "--audit", str(audit_path),
+              "--output", str(evidence_path)])
+    write_json(audit_path, approved_audit(batch))
+    assert main(["verify-edit-audit", "--edits", str(batch_path), "--audit", str(audit_path),
+                 "--output", str(evidence_path)]) == 0
+    assert json.loads(evidence_path.read_text())["population_size"] == 4

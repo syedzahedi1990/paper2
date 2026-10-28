@@ -11,7 +11,8 @@ from paper2.traces import symbolic_edit_prediction, _validate_oracle_edit
 
 def observations(n, plan, seeds=(1,)):
     return [{"world_id": str(i), "view": view, "answer": "A", "expected_edited_answer": "B",
-             "prediction": "B" if i % 2 else "A", "training_seed": seed, "edit_precision_plan": plan}
+             "prediction": "B" if i % 2 else "A", "training_seed": seed, "edit_precision_plan": plan,
+             "question_timing": "direct_fixed"}
             for i in range(n) for seed in seeds for view in VIEWS]
 
 

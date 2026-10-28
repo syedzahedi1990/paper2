@@ -6,8 +6,8 @@ from .components import ComponentInterventionEngine, Site, encode_input
 from .controls import residual_control_eligibility
 
 
-def intervention_masks(sites, mode="joint", residual_control_layers=None):
-    """Retain component masks and optionally add a separate residual control band."""
+def intervention_masks(sites, mode="joint", residual_control_layers=None, g4_test_layers=None):
+    """Retain diagnostics and add K/V/residual on the declared G4 test band."""
     sites = tuple(sites)
     if mode not in ("joint", "single", "both"):
         raise ValueError("Unknown layer mode")
@@ -27,16 +27,28 @@ def intervention_masks(sites, mode="joint", residual_control_layers=None):
         requested = tuple(residual_control_layers)
         if (not requested or any(type(layer) is not int or layer <= 0 for layer in requested)
                 or len(set(requested)) != len(requested)):
-            raise ValueError("Residual positive-control layers must be distinct integers greater than zero")
+            raise ValueError("Residual diagnostic layers must be distinct integers greater than zero")
         mask = tuple(sorted(requested))
         if not any(existing == mask and component == "residual" for existing, component, _ in result):
             result.append((mask, "residual", tuple(Site(layer, "residual") for layer in mask)))
+    if g4_test_layers is not None:
+        requested = tuple(g4_test_layers)
+        if (not requested or any(type(layer) is not int or layer <= 0 for layer in requested)
+                or len(set(requested)) != len(requested)):
+            raise ValueError("G4 test layers must be distinct integers greater than zero")
+        mask = tuple(sorted(requested))
+        if list(mask) != list(range(mask[0], mask[-1] + 1)):
+            raise ValueError("G4 test layers must declare a contiguous band")
+        for component in ("k", "v", "residual"):
+            if not any(existing == mask and name == component for existing, name, _ in result):
+                result.append((mask, component, tuple(by_site.get((layer, component), Site(layer, component))
+                                                     for layer in mask)))
     return result
 
 
 def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Iterable[Site],
                        *, seed: int = 0, layer_mode="joint", donor_backend=None,
-                       residual_control_layers=None) -> list[dict[str, Any]]:
+                       residual_control_layers=None, g4_test_layers=None) -> list[dict[str, Any]]:
     """Swap all selected layers at once per component, with own/null controls.
 
     A donor backend explicitly requests a secondary between-checkpoint analysis:
@@ -46,14 +58,16 @@ def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Ite
     """
     from paper2.prompts import answer_token_ids, render_prompt
     sites = tuple(sites)
-    masks = intervention_masks(sites, layer_mode, residual_control_layers)
+    masks = intervention_masks(sites, layer_mode, residual_control_layers, g4_test_layers)
     engine = ComponentInterventionEngine(backend.model, backend.checkpoint_id)
     cross = donor_backend is not None
-    if residual_control_layers is not None:
-        eligible, reason = residual_control_eligibility(residual_control_layers, len(engine.layers), cross=cross)
+    g4_test_layers = sorted(g4_test_layers) if g4_test_layers is not None else None
+    if g4_test_layers is not None:
+        eligible, reason = residual_control_eligibility(g4_test_layers, len(engine.layers),
+                                                       test_layers=g4_test_layers, cross=cross)
         if not eligible:
             raise ValueError(f"Residual positive-control band is ineligible: {reason}")
-    # An additional control band may include sites outside the primary K/V band.
+    # The declared G4 band always measures all three components together.
     sites = tuple({(site.layer, site.component): site for _, _, selected in masks for site in selected}.values())
     donor_engine = ComponentInterventionEngine(donor_backend.model, donor_backend.checkpoint_id) if cross else engine
     rows = []
@@ -100,14 +114,18 @@ def run_component_test(backend: Any, pairs: Iterable[dict[str, Any]], sites: Ite
                 "baseline_prediction": baseline.prediction,
                 "baseline_correct": baseline.prediction == recipient_row["answer"],
                 "model_num_hidden_layers": len(engine.layers),
+                "g4_test_layers": g4_test_layers,
             }
 
             def add(logits, control, *, mask=(), component=None, receipt=None, role="recipient"):
                 answer = backend.answer_from_logits(logits, mappings[role])
-                eligible, reason = residual_control_eligibility(mask, len(engine.layers), cross=cross)
+                eligible, reason = residual_control_eligibility(mask, len(engine.layers),
+                                                               test_layers=g4_test_layers, cross=cross)
                 eligible = eligible and component == "residual"
                 if component != "residual":
                     reason = "not_residual"
+                if receipt is not None:
+                    receipt = {**receipt, "g4_test_layers": g4_test_layers}
                 rows.append({**common, "layer": mask[0] if len(mask) == 1 else None,
                              "layers": list(mask), "mask_id": ",".join(map(str, mask)), "component": component,
                              "control": control, "positive_control": eligible and control == "natural",

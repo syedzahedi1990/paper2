@@ -10,18 +10,23 @@ def resource_plan(config: TrainingConfig, training_examples: int, development_ex
                   delimiter_tokens: int, *, synthetic: bool = False) -> dict[str, Any]:
     budget = config.training_budget(training_examples, synthetic=synthetic)
     steps = budget['resolved_max_steps']
-    evaluations = config.evaluation_schedule(steps) if development_examples else []
+    native_evaluations = config.evaluation_schedule(steps) if development_examples else []
+    immediate_evaluations = config.immediate_evaluation_schedule(steps) if development_examples else []
+    evaluations = sorted(set(native_evaluations) | set(immediate_evaluations))
     native_budget = config.trace_cap + delimiter_tokens + 4 if config.reasoning else 4
-    native_generations = len(evaluations) * development_examples
+    native_generations = len(native_evaluations) * development_examples
     checkpoints = sorted({steps, *range(config.save_steps, steps + 1, config.save_steps)})
     return {
+        'schema_version': 2,
         'optimizer_steps': steps,
         'training_prompt_exposures': budget['planned_prompt_exposures'],
         'training_rollout_completions': budget['planned_prompt_exposures'] * config.group_size if config.rl else 0,
         'evaluation_steps': evaluations, 'evaluation_panels': len(evaluations),
+        'evaluation_native_steps': native_evaluations, 'evaluation_native_panels': len(native_evaluations),
+        'evaluation_immediate_steps': immediate_evaluations, 'evaluation_immediate_panels': len(immediate_evaluations),
         'development_worlds_per_panel': development_examples,
         'evaluation_native_generations': native_generations,
-        'evaluation_immediate_forward_calls': native_generations,
+        'evaluation_immediate_forward_calls': len(immediate_evaluations) * development_examples,
         'evaluation_native_generation_batch_size': 1,
         'evaluation_max_new_tokens_per_generation': native_budget,
         'evaluation_generated_token_upper_bound': native_generations * native_budget,
@@ -43,17 +48,19 @@ def full_pool_projection(config: TrainingConfig, training_examples: int, develop
     """
     target = replace(config, stage='pilot' if config.stage == 'profile' else config.stage,
                      profile=False, max_steps=None, num_train_epochs=1.0,
-                     eval_steps=250 if config.rl else 25, save_steps=50)
+                     eval_steps=250 if config.rl else 25, immediate_eval_steps=50 if config.rl else 25, save_steps=50)
     plan = resource_plan(target, training_examples, development_examples, delimiter_tokens, synthetic=synthetic)
     completed_steps = measured.get('completed_optimizer_steps', 0)
-    measured_panels = measured.get('evaluation_panels', 0)
+    native_panels = measured.get('evaluation_native_panels', 0)
+    immediate_panels = measured.get('evaluation_immediate_panels', 0)
     measured_saves = measured.get('evaluated_adapter_save_count', 0)
     measured_checkpoints = measured.get('resumable_checkpoint_save_count', 0)
     training_seconds = max(0.0, measured.get('wall_seconds', 0.0) - measured.get('evaluation_seconds', 0.0)
                            - measured.get('checkpoint_seconds', 0.0))
     rates = {
         'training_and_orchestration_seconds_per_step': training_seconds / completed_steps if completed_steps else None,
-        'evaluation_seconds_per_panel': measured.get('evaluation_seconds', 0.0) / measured_panels if measured_panels else None,
+        'native_evaluation_seconds_per_panel': measured['evaluation_native_seconds'] / native_panels if native_panels and 'evaluation_native_seconds' in measured else None,
+        'immediate_evaluation_seconds_per_panel': measured['evaluation_immediate_seconds'] / immediate_panels if immediate_panels and 'evaluation_immediate_seconds' in measured else None,
         'evaluated_adapter_save_seconds_per_copy': measured.get('evaluated_adapter_save_seconds', 0.0) / measured_saves if measured_saves else None,
         'resumable_checkpoint_seconds_per_write': measured.get('resumable_checkpoint_save_seconds', 0.0) / measured_checkpoints if measured_checkpoints else None,
     }
@@ -61,7 +68,8 @@ def full_pool_projection(config: TrainingConfig, training_examples: int, develop
         return rates[rate] * count if rates[rate] is not None else (0.0 if count == 0 else None)
     seconds = {
         'training_and_orchestration': scaled('training_and_orchestration_seconds_per_step', plan['optimizer_steps']),
-        'development_evaluation': scaled('evaluation_seconds_per_panel', plan['evaluation_panels']),
+        'development_native_evaluation': scaled('native_evaluation_seconds_per_panel', plan['evaluation_native_panels']),
+        'development_immediate_evaluation': scaled('immediate_evaluation_seconds_per_panel', plan['evaluation_immediate_panels']),
         'evaluated_adapter_saves': scaled('evaluated_adapter_save_seconds_per_copy', plan['retained_evaluated_adapters']),
         'resumable_checkpoint_saves': scaled('resumable_checkpoint_seconds_per_write', plan['resumable_checkpoint_writes']),
         'final_adapter_save': measured.get('final_adapter_save_seconds'),

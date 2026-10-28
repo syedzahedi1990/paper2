@@ -39,5 +39,6 @@
   "load_in_4bit": false,
   "attn_implementation": "sdpa",
   "trace_source": "paper1_symbolic_oracle_v1",
-  "profile": true
+  "profile": true,
+  "immediate_eval_steps": 5
 }

@@ -5,13 +5,16 @@ from paper2.analysis import _seed, cluster_interval
 from paper2.data import VIEWS
 
 
-def residual_control_eligibility(layers, num_layers, *, cross=False):
+def residual_control_eligibility(layers, num_layers, *, test_layers=None, cross=False):
     """Conservatively exclude input reconstruction and disconnected output sites.
 
     The engine patches block outputs, not token embeddings. A mask beginning at
     block zero is still excluded from G4 because it may approximate a donor-input
     reconstruction. At least one downstream attention block must remain for the
-    critical token's residual state to influence the answer position.
+    critical token's residual state to influence the answer position. An interior
+    mask is not sufficient: the control must match the explicitly declared K/V
+    test band, including its first layer. Unselected single-layer diagnostics
+    cannot certify a different joint band.
     """
     if cross:
         return False, "secondary_cross_model"
@@ -23,13 +26,20 @@ def residual_control_eligibility(layers, num_layers, *, cross=False):
         return False, "includes_layer_zero_input_reconstruction_risk"
     if min(layers) == num_layers - 1:
         return False, "no_downstream_attention_block"
-    return True, "nonzero_band_with_downstream_attention"
+    if (not isinstance(test_layers, (list, tuple)) or not test_layers
+            or any(type(layer) is not int or not 0 < layer < num_layers for layer in test_layers)
+            or list(test_layers) != list(range(min(test_layers), max(test_layers) + 1))):
+        return False, "missing_or_invalid_preregistered_test_band"
+    if sorted(layers) != list(test_layers):
+        return False, "residual_band_does_not_match_preregistered_test_band"
+    return True, "aligned_preregistered_band_with_downstream_attention"
 
 
-def _receipt_eligibility(row):
+def _receipt_eligibility(row, component="residual"):
     layers = row.get("layers", [])
     eligible, reason = residual_control_eligibility(
         layers, row.get("model_num_hidden_layers"),
+        test_layers=row.get("g4_test_layers"),
         cross=row.get("analysis") != "primary_within_checkpoint")
     if not eligible:
         return eligible, reason
@@ -42,12 +52,35 @@ def _receipt_eligibility(row):
             or receipt.get("checkpoint_id") != row.get("checkpoint_id")
             or receipt.get("donor_checkpoint_id") != row.get("checkpoint_id")
             or receipt.get("control") != row.get("control")
+            or receipt.get("g4_test_layers") != row.get("g4_test_layers")
+            or row.get("component") != component
             or row.get("mask_id") != ",".join(map(str, sorted(layers)))
             or len(sites) != len(layers)
             or {site.get("layer") for site in sites} != set(layers)
-            or any(site.get("component") != "residual" or not site.get("other_token_rows_exact") for site in sites)):
+            or any(site.get("component") != component or not site.get("other_token_rows_exact") for site in sites)):
         return False, "missing_or_inconsistent_native_receipt"
     return True, reason
+
+
+def _aligned_component_evidence(rows, residuals, checkpoint, mask):
+    """Require actual K and V conditions on the band certified by the control."""
+    expected = {(_seed(row), row["pair_id"], row["view"], row["control"]): row for row in residuals}
+    for component in ("k", "v"):
+        component_rows = [row for row in rows if row.get("checkpoint_id") == checkpoint
+                          and row.get("mask_id") == mask and row.get("component") == component
+                          and row.get("control") in ("natural", "own", "signed_permutation")]
+        indexed = {(_seed(row), row["pair_id"], row["view"], row["control"]): row for row in component_rows}
+        if len(indexed) != len(component_rows) or set(indexed) != set(expected):
+            return "missing_or_incomplete_same_band_key_value_panels"
+        for key, row in indexed.items():
+            residual = expected[key]
+            if not _receipt_eligibility(row, component)[0]:
+                return "missing_or_inconsistent_same_band_key_value_receipts"
+            if (row.get("g4_test_layers") != residual.get("g4_test_layers")
+                    or any(row.get(field) != residual.get(field)
+                           for field in ("ordinary_target", "forecasts", "forecast_target"))):
+                return "inconsistent_same_band_key_value_targets"
+    return None
 
 
 def residual_control_summary(rows):
@@ -58,6 +91,7 @@ def residual_control_summary(rows):
     preservation and precision; no architecture-only condition is a pass.
     """
     from .scoring import score_consequence_pattern
+    rows = list(rows)
     groups = defaultdict(list)
     for row in rows:
         if row.get("component") == "residual" and row.get("control") in ("natural", "own", "signed_permutation"):
@@ -66,6 +100,7 @@ def residual_control_summary(rows):
     for (checkpoint, mask), group in sorted(groups.items(), key=lambda item: repr(item[0])):
         reasons = {_receipt_eligibility(row)[1] for row in group if not _receipt_eligibility(row)[0]}
         candidate = {"checkpoint_id": checkpoint, "mask_id": mask, "layers": group[0].get("layers", []),
+                     "test_layers": group[0].get("g4_test_layers"),
                      "eligible": not reasons, "ineligible_reasons": sorted(reasons), "effects": {}}
         if reasons:
             result.append(candidate)
@@ -96,6 +131,11 @@ def residual_control_summary(rows):
                 {view: row["prediction"] for view, row in views.items()},
                 {view: row["ordinary_target"] for view, row in views.items()},
                 {view: row["forecasts"] for view, row in views.items()})
+        alignment_error = _aligned_component_evidence(rows, group, checkpoint, mask)
+        if alignment_error:
+            candidate.update(eligible=False, ineligible_reasons=[alignment_error])
+            result.append(candidate)
+            continue
         clusters = defaultdict(lambda: defaultdict(list))
         for (seed, pair, control), score in scores.items():
             if control == "own":

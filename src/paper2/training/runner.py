@@ -149,8 +149,9 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
 
 
 def _development_predictions(model: Any, tokenizer: Any, rows: list[dict[str, Any]],
-                             config: TrainingConfig, torch: Any) -> list[dict[str, Any]]:
-    """Evaluate both Test 1 and the arm's actual completion/reward format.
+                             config: TrainingConfig, torch: Any, *,
+                             formats: tuple[str, ...] = ('immediate', 'native')) -> list[dict[str, Any]]:
+    """Evaluate the requested Test 1 and/or native completion/reward format.
 
     Native evaluation is an uninterrupted greedy completion with the training cap
     processor and correctness parser. An immediate-answer failure cannot hide a
@@ -161,23 +162,28 @@ def _development_predictions(model: Any, tokenizer: Any, rows: list[dict[str, An
     from transformers import LogitsProcessorList
     if not rows:
         raise ValueError('Development evaluation needs nonempty rows')
+    if not formats or set(formats) - {'immediate', 'native'}:
+        raise ValueError('Development formats must be immediate and/or native')
     records = []
     was_training = model.training
     model.eval()
     try:
         for row in rows:
-            prompt = render_prompt(tokenizer, row, reasoning=False)
-            encoded = tokenizer(prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
-            # Match Test 1: full-vocabulary greedy next token; invalid tokens are wrong.
-            # Answer labels must remain prefix-stable single tokens.
-            letter_ids = answer_token_ids(tokenizer, prompt, row['choices'])
-            with torch.no_grad():
-                logits = model(**encoded).logits[0, -1]
-            predicted_id = int(logits.argmax().item())
-            prediction = next((label for label, token in letter_ids.items() if token == predicted_id), None)
             common = {key: row[key] for key in ('id', 'world_id', 'answer', 'view', 'split')}
-            records.append({**common, 'format': 'immediate', 'prediction': prediction,
-                            'correct': prediction == row['answer'], 'token_id': predicted_id})
+            if 'immediate' in formats:
+                prompt = render_prompt(tokenizer, row, reasoning=False)
+                encoded = tokenizer(prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
+                # Match Test 1: full-vocabulary greedy next token; invalid tokens are wrong.
+                # Answer labels must remain prefix-stable single tokens.
+                letter_ids = answer_token_ids(tokenizer, prompt, row['choices'])
+                with torch.no_grad():
+                    logits = model(**encoded).logits[0, -1]
+                predicted_id = int(logits.argmax().item())
+                prediction = next((label for label, token in letter_ids.items() if token == predicted_id), None)
+                records.append({**common, 'format': 'immediate', 'prediction': prediction,
+                                'correct': prediction == row['answer'], 'token_id': predicted_id})
+            if 'native' not in formats:
+                continue
             native_prompt = render_prompt(tokenizer, row, reasoning=config.reasoning)
             native_input = tokenizer(native_prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
             cap = TraceCapProcessor(tokenizer, config.trace_cap) if config.reasoning else None
@@ -309,6 +315,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     planned_resources = resource_plan(config, len(training_rows), len(dev_rows or []), delimiter_tokens,
                                       synthetic=synthetic)
     evaluation_steps = set(planned_resources['evaluation_steps'])
+    native_evaluation_steps = set(planned_resources['evaluation_native_steps'])
+    immediate_evaluation_steps = set(planned_resources['evaluation_immediate_steps'])
     tokenizer.padding_side = 'left' if config.rl else 'right'
     if synthetic:
         model = synthetic_model
@@ -383,7 +391,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                 stream.write(json.dumps(record) + '\n')
 
         def evaluate(self, step):
-            if not dev_rows:
+            if not dev_rows or step not in evaluation_steps:
                 return
             # Rotation may remove resumable trainer checkpoints. Preserve a small
             # adapter at every evaluated step so matching never selects missing weights.
@@ -401,10 +409,24 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                                     sum(path.stat().st_size for path in adapter.rglob('*') if path.is_file()))
             from paper2.io import file_digest
             adapter_digest = file_digest(adapter / 'adapter_model.safetensors')
-            start = time.perf_counter()
-            predictions = _development_predictions(trainer.model, tokenizer, dev_rows, config, torch)
-            _sync(torch)
-            ledger.evaluation_seconds += time.perf_counter() - start
+            predictions = []
+            for format_name, scheduled_steps in (('immediate', immediate_evaluation_steps),
+                                                 ('native', native_evaluation_steps)):
+                if step not in scheduled_steps:
+                    continue
+                _sync(torch)
+                start = time.perf_counter()
+                predictions.extend(_development_predictions(trainer.model, tokenizer, dev_rows, config, torch,
+                                                            formats=(format_name,)))
+                _sync(torch)
+                elapsed = time.perf_counter() - start
+                ledger.evaluation_seconds += elapsed
+                if format_name == 'native':
+                    ledger.evaluation_native_seconds += elapsed
+                    ledger.evaluation_native_panels += 1
+                else:
+                    ledger.evaluation_immediate_seconds += elapsed
+                    ledger.evaluation_immediate_panels += 1
             ledger.evaluation_panels += 1
             ledger.evaluation_native_generations += sum(row['format'].startswith('native_') for row in predictions)
             ledger.evaluation_immediate_forward_calls += sum(row['format'] == 'immediate' for row in predictions)
@@ -419,6 +441,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             metrics = []
             for format_name in ('immediate', 'native_reasoning' if config.reasoning else 'native_answer'):
                 selected = [row for row in predictions if row['format'] == format_name]
+                if not selected:
+                    continue
                 metrics.append({**identity, 'format': format_name, 'n': len(selected),
                                 'accuracy': sum(row['correct'] for row in selected) / len(selected),
                                 'decoding': 'greedy_full_vocabulary',
@@ -426,24 +450,31 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                 'unique_worlds_seen': len(ledger.observed_world_ids)})
             _upsert_jsonl(output / 'checkpoint_evaluations.jsonl', metrics, ('checkpoint_id', 'format'))
             _upsert_jsonl(output / 'checkpoint_predictions.jsonl', predictions, ('checkpoint_id', 'format', 'id'))
-            all_metrics = [json.loads(line) for line in (output / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
-            native_format = metrics[1]['format']
-            baseline = next((row for row in all_metrics if row['step'] == 0 and row['format'] == native_format), None)
-            g1_evidence = {'schema_version': 1, 'status': 'measurement_only_requires_gate_review',
-                           'primary_format': native_format, 'baseline': baseline, 'latest': metrics[1],
-                           'native_accuracy_gain': metrics[1]['accuracy'] - baseline['accuracy'] if baseline else None,
-                           'immediate_latest': metrics[0],
-                           'checkpoint_evaluations': str((output / 'checkpoint_evaluations.jsonl').resolve()),
-                           'checkpoint_predictions': str((output / 'checkpoint_predictions.jsonl').resolve()),
-                           'note': 'Judge G1 in the rewarded native format; immediate-answer transfer is a separate outcome.'}
-            (output / 'g1_learning_evidence.json').write_text(json.dumps(g1_evidence, indent=2) + '\n')
-            self.on_log(None, type('State', (), {'global_step': step})(), None,
-                        logs={'dev/direct_immediate_accuracy': metrics[0]['accuracy'],
-                              'dev/direct_native_accuracy': metrics[1]['accuracy'],
-                              'dev/native_format': native_format, 'dev/n': len(dev_rows),
-                              'dev/checkpoint_id': checkpoint_id,
-                              'train/unique_worlds_seen': len(ledger.observed_world_ids),
-                              'train/pool_coverage': len(ledger.observed_world_ids) / len(training_rows)})
+            by_format = {metric['format']: metric for metric in metrics}
+            native_format = 'native_reasoning' if config.reasoning else 'native_answer'
+            logs = {'dev/n': len(dev_rows), 'dev/checkpoint_id': checkpoint_id,
+                    'train/unique_worlds_seen': len(ledger.observed_world_ids),
+                    'train/pool_coverage': len(ledger.observed_world_ids) / len(training_rows)}
+            if 'immediate' in by_format:
+                logs['dev/direct_immediate_accuracy'] = by_format['immediate']['accuracy']
+            if native_format in by_format:
+                # G1 only moves at a measured native step; never carry a stale
+                # native accuracy onto a cheaper immediate-only checkpoint.
+                all_metrics = [json.loads(line) for line in (output / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
+                baseline = next((row for row in all_metrics if row['step'] == 0 and row['format'] == native_format), None)
+                latest = by_format[native_format]
+                immediate = max((row for row in all_metrics if row['format'] == 'immediate' and row['step'] <= step),
+                                key=lambda row: row['step'], default=None)
+                g1_evidence = {'schema_version': 2, 'status': 'measurement_only_requires_gate_review',
+                               'primary_format': native_format, 'baseline': baseline, 'latest': latest,
+                               'native_accuracy_gain': latest['accuracy'] - baseline['accuracy'] if baseline else None,
+                               'immediate_latest': immediate,
+                               'checkpoint_evaluations': str((output / 'checkpoint_evaluations.jsonl').resolve()),
+                               'checkpoint_predictions': str((output / 'checkpoint_predictions.jsonl').resolve()),
+                               'note': 'Judge G1 in the rewarded native format; immediate-answer transfer is a separate outcome.'}
+                (output / 'g1_learning_evidence.json').write_text(json.dumps(g1_evidence, indent=2) + '\n')
+                logs.update({'dev/direct_native_accuracy': latest['accuracy'], 'dev/native_format': native_format})
+            self.on_log(None, type('State', (), {'global_step': step})(), None, logs=logs)
 
         def on_train_begin(self, args, state, control, **kwargs):
             self.evaluate(state.global_step)

@@ -41,7 +41,9 @@ class TrainingConfig:
     temperature: float = 0.8
     top_p: float = 1.0
     logging_steps: int = 1
+    # eval_steps is the native completion cadence; immediate scoring is cheaper.
     eval_steps: int | None = None
+    immediate_eval_steps: int | None = None
     save_steps: int = 50
     save_total_limit: int = 6
     gradient_checkpointing: bool = True
@@ -58,14 +60,23 @@ class TrainingConfig:
             object.__setattr__(self, 'learning_rate', 1e-5 if self.rl else 1e-4)
         if self.eval_steps is None:
             # Native reasoning evaluation is sequential and can dominate a run.
-            # Keep sparse, retained RL snapshots; SFT has only 250 default steps.
+            # Immediate scoring and retained RL snapshots use their own cadence.
             object.__setattr__(self, 'eval_steps', 250 if self.rl else 25)
+        if self.immediate_eval_steps is None:
+            # Preserve short legacy/profile schedules without extra generations.
+            object.__setattr__(self, 'immediate_eval_steps', min(self.eval_steps, 50 if self.rl else 25))
 
     def evaluation_schedule(self, max_steps: int) -> list[int]:
-        """Include the base and final model, even off the regular interval."""
+        """Native completion schedule, including base and off-interval final."""
         if max_steps < 1:
             raise ValueError('Evaluation schedule needs positive optimizer steps')
         return sorted({0, max_steps, *range(self.eval_steps, max_steps + 1, self.eval_steps)})
+
+    def immediate_evaluation_schedule(self, max_steps: int) -> list[int]:
+        """Cheap matching measurements, each with a retained adapter."""
+        if max_steps < 1:
+            raise ValueError('Evaluation schedule needs positive optimizer steps')
+        return sorted({0, max_steps, *range(self.immediate_eval_steps, max_steps + 1, self.immediate_eval_steps)})
 
     @property
     def reasoning(self) -> bool:
@@ -121,7 +132,7 @@ class TrainingConfig:
             raise ValueError('warmup_ratio must be between zero and one')
         if self.lr_scheduler_type not in ('constant', 'constant_with_warmup', 'linear', 'cosine'):
             raise ValueError('Unsupported preregistered learning-rate schedule')
-        if min(self.eval_steps, self.save_steps, self.logging_steps) < 1:
+        if min(self.eval_steps, self.immediate_eval_steps, self.save_steps, self.logging_steps) < 1:
             raise ValueError('Logging/evaluation/save intervals must be positive')
         if self.rl and self.batch_size * self.gradient_accumulation_steps % self.group_size:
             raise ValueError('Effective single-GPU batch must be divisible by group size 8')

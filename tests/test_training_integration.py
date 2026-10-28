@@ -87,6 +87,8 @@ def test_real_trl_optimizer_and_saved_adapter(tmp_path, arm):
         assert compute['unique_worlds_seen'] == 2
         assert compute['completed_optimizer_steps'] == 2
         assert compute['evaluation_panels'] == 3
+        assert compute['evaluation_native_panels'] == compute['evaluation_immediate_panels'] == 3
+        assert compute['evaluation_seconds'] == pytest.approx(compute['evaluation_native_seconds'] + compute['evaluation_immediate_seconds'])
         assert compute['evaluation_native_generations'] == 6
         assert compute['evaluation_immediate_forward_calls'] == 6
         assert compute['evaluation_generated_tokens'] > 0
@@ -194,20 +196,28 @@ def test_g1_native_reasoning_can_succeed_when_immediate_answer_fails():
     class TraceOnlyModel:
         device = torch.device('cpu')
         training = True
+        generation_calls = 0
+        forward_calls = 0
         def train(self, mode=True):
             self.training = mode
         def eval(self):
             self.train(False)
         def __call__(self, **encoded):
+            self.forward_calls += 1
             logits = torch.zeros(1, encoded['input_ids'].shape[1], len(tok))
             logits[..., tok.unk_token_id] = 10
             return SimpleNamespace(logits=logits)
         def generate(self, input_ids, **kwargs):
+            self.generation_calls += 1
             completion = tok.encode('box\nAnswer: A', add_special_tokens=False) + [tok.eos_token_id]
             return torch.cat([input_ids, torch.tensor([completion])], dim=1)
 
     model = TraceOnlyModel()
     example = dict(rows()[1], split='development')
+    immediate = _development_predictions(model, tok, [example], TrainingConfig(), torch, formats=('immediate',))
+    assert len(immediate) == 1 and model.generation_calls == 0 and model.forward_calls == 1
+    native = _development_predictions(model, tok, [example], TrainingConfig(), torch, formats=('native',))
+    assert len(native) == 1 and model.generation_calls == 1 and model.forward_calls == 1
     results = _development_predictions(model, tok, [example], TrainingConfig(), torch)
     assert results[0]['format'] == 'immediate' and not results[0]['correct']
     assert results[1]['format'] == 'native_reasoning' and results[1]['correct']
@@ -234,14 +244,25 @@ def test_profile_evaluates_off_interval_final_and_records_resource_projection(tm
     from paper2.training.runner import run_training
     model, tok = tiny_fixture()
     config = TrainingConfig(arm='answer_rl', stage='profile', model='paper2-random-tiny-qwen',
-                            max_steps=3, eval_steps=2, save_steps=2, bf16=False,
+                            max_steps=3, eval_steps=2, immediate_eval_steps=1, save_steps=2, bf16=False,
                             gradient_checkpointing=False, lora_rank=2, lora_alpha=4, beta=0.0)
     dev = [{**rows()[0], 'id': 'dev', 'world_id': 'dev', 'split': 'development'}]
     result = run_training(config, rows(), tmp_path, dev_rows=dev, synthetic_model=model, synthetic_tokenizer=tok)
     metrics = [json.loads(line) for line in (tmp_path / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
-    assert {row['step'] for row in metrics} == {0, 2, 3}
-    assert result['compute']['evaluation_panels'] == 3
-    assert result['manifest']['resource_plan']['evaluation_steps'] == [0, 2, 3]
+    assert {row['step'] for row in metrics if row['format'] == 'immediate'} == {0, 1, 2, 3}
+    assert {row['step'] for row in metrics if row['format'] == 'native_answer'} == {0, 2, 3}
+    assert result['compute']['evaluation_panels'] == 4
+    assert result['compute']['evaluation_immediate_panels'] == 4
+    assert result['compute']['evaluation_native_panels'] == 3
+    assert result['compute']['evaluation_immediate_forward_calls'] == 4
+    assert result['compute']['evaluation_native_generations'] == 3
+    assert result['compute']['evaluated_adapter_save_count'] == 4
+    assert result['manifest']['resource_plan']['evaluation_steps'] == [0, 1, 2, 3]
+    assert all((Path(row['path']) / 'adapter_model.safetensors').is_file() for row in metrics)
+    curve = [json.loads(line) for line in (tmp_path / 'learning_curve.jsonl').read_text().splitlines()]
+    assert not any('dev/direct_native_accuracy' in row for row in curve if row['step'] == 1)
+    evidence = json.loads((tmp_path / 'g1_learning_evidence.json').read_text())
+    assert evidence['latest']['step'] == 3 and evidence['baseline']['step'] == 0
     report = json.loads((tmp_path / 'profile_report.json').read_text())
     assert report['synthetic'] is True and report['gpu_seconds'] == 0
     assert report['full_pool_resource_projection']['projected_total_seconds'] > 0

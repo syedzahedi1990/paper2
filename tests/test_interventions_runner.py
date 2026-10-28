@@ -92,22 +92,24 @@ def test_joint_and_single_masks_preserve_head_selection():
         intervention_masks(sites + [sites[0]])
 
 
-def test_explicit_nonzero_residual_control_keeps_full_depth_key_value_masks():
+def test_explicit_g4_band_measures_aligned_components_and_keeps_full_depth_masks():
     from paper2.interventions.controls import residual_control_summary
     pair = matched_pair(generate_world(random.Random(13), distractor_events=0))
     backend = tiny_backend(pair, num_layers=3)
     sites = [Site(layer, component) for layer in range(3) for component in ("k", "v", "residual")]
-    rows = run_component_test(backend, [pair], sites, residual_control_layers=[1])
-    assert len(rows) == 8 * (2 + 4 * 3)
-    assert {tuple(row["layers"]) for row in rows if row["component"] in ("k", "v")} == {(0, 1, 2)}
+    rows = run_component_test(backend, [pair], sites, g4_test_layers=[1])
+    assert len(rows) == 8 * (2 + 6 * 3)
+    assert {tuple(row["layers"]) for row in rows if row["component"] in ("k", "v")} == {(0, 1, 2), (1,)}
     controls = [row for row in rows if row["positive_control"]]
     assert len(controls) == 8 and all(row["layers"] == [1] for row in controls)
     assert residual_control_summary(rows)["eligible_masks"] == ["1"]
     assert not residual_control_summary(rows)["empirical_gate_passed"]
+    assert all(row["g4_test_layers"] == [1] for row in rows)
+    assert all(row["receipt"]["g4_test_layers"] == [1] for row in rows if row["receipt"])
     with pytest.raises(ValueError, match="greater than zero"):
-        run_component_test(backend, [pair], sites, residual_control_layers=[0, 1])
+        run_component_test(backend, [pair], sites, g4_test_layers=[0, 1])
     with pytest.raises(ValueError, match="no_downstream_attention"):
-        run_component_test(backend, [pair], sites, residual_control_layers=[2])
+        run_component_test(backend, [pair], sites, g4_test_layers=[2])
 
 
 def test_nonzero_residual_is_real_intervention_without_donor_reconstruction():
@@ -206,3 +208,15 @@ def test_component_cli_exposes_secondary_donor_and_preserves_joint_mask(tmp_path
     assert all(row['analysis'] == 'secondary_cross_model' for row in rows)
     assert {tuple(row['layers']) for row in rows if row['receipt']} == {(0, 1)}
     assert json.loads(Path(str(output) + '.run.json').read_text())['status'] == 'completed'
+
+
+def test_single_layer_diagnostics_are_not_automatically_g4_controls():
+    from paper2.interventions.controls import residual_control_summary
+    pair = matched_pair(generate_world(random.Random(13), distractor_events=0))
+    backend = tiny_backend(pair, num_layers=4)
+    sites = [Site(layer, component) for layer in range(4) for component in ("k", "v", "residual")]
+    rows = run_component_test(backend, [pair], sites, layer_mode="both", g4_test_layers=[2])
+    assert residual_control_summary(rows)["eligible_masks"] == ["2"]
+    early = [row for row in rows if row["component"] == "residual" and row["layers"] == [1]]
+    assert early and not any(row["g4_control_eligible"] for row in early)
+    assert all(row["g4_control_reason"] == "residual_band_does_not_match_preregistered_test_band" for row in early)

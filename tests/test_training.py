@@ -60,10 +60,15 @@ def test_evaluation_budget_is_sparse_for_rl_and_keeps_base_final_and_profile():
     rl = TrainingConfig()
     sft = TrainingConfig(arm='label_sft')
     plan = resource_plan(rl, 2000, 120, 3)
-    assert plan['evaluation_steps'] == [0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000]
+    assert plan['evaluation_native_steps'] == [0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000]
+    assert plan['evaluation_immediate_steps'] == list(range(0, 2001, 50))
+    assert plan['evaluation_steps'] == plan['evaluation_immediate_steps']
+    assert plan['evaluation_native_panels'] == 9
+    assert plan['evaluation_immediate_panels'] == 41
+    assert plan['evaluation_immediate_forward_calls'] == 4920
     assert plan['evaluation_native_generations'] == 1080
     assert plan['evaluation_generated_token_upper_bound'] == 1080 * 391
-    assert plan['retained_evaluated_adapters'] == 9
+    assert plan['retained_evaluated_adapters'] == 41
     assert resource_plan(sft, 2000, 120, 3)['evaluation_panels'] == 11
     assert rl.evaluation_schedule(503) == [0, 250, 500, 503]
     assert TrainingConfig(stage='profile', max_steps=5, eval_steps=5).evaluation_schedule(5) == [0, 5]
@@ -77,7 +82,9 @@ def test_shipped_learning_configs_use_the_documented_evaluation_budget():
     for path in (root / 'configs').glob('*/*.json'):
         config = load_config(path)
         assert config.eval_steps == (250 if config.rl else 25)
-        assert resource_plan(config, 2000, 120, 3)['evaluation_panels'] == (9 if config.rl else 11)
+        assert config.immediate_eval_steps == (50 if config.rl else 25)
+        assert resource_plan(config, 2000, 120, 3)['evaluation_native_panels'] == (9 if config.rl else 11)
+        assert resource_plan(config, 2000, 120, 3)['evaluation_immediate_panels'] == (41 if config.rl else 11)
     profile = load_config(root / 'configs/profile_3b.json')
     assert resource_plan(profile, 2000, 120, 3)['evaluation_steps'] == [0, 5]
 
@@ -86,19 +93,38 @@ def test_projection_scales_training_and_evaluation_separately_and_reports_storag
     config = TrainingConfig(stage='profile', max_steps=5, eval_steps=5, save_steps=5)
     measured = dict(completed_optimizer_steps=5, wall_seconds=30, evaluation_seconds=20,
                     checkpoint_seconds=4, evaluation_panels=2, evaluated_adapter_save_count=2,
+                    evaluation_native_panels=2, evaluation_immediate_panels=2,
+                    evaluation_native_seconds=18, evaluation_immediate_seconds=2,
                     evaluated_adapter_save_seconds=2, resumable_checkpoint_save_count=1,
                     resumable_checkpoint_save_seconds=1, final_adapter_save_seconds=1,
                     max_evaluated_adapter_bytes=100)
     projection = full_pool_projection(config, 2000, 120, 3, measured)
-    assert projection['projected_seconds']['development_evaluation'] == 90
+    assert projection['projected_seconds']['development_native_evaluation'] == 81
+    assert projection['projected_seconds']['development_immediate_evaluation'] == 41
     assert projection['projected_seconds']['training_and_orchestration'] == 2400
-    assert projection['projected_total_seconds'] == 2540
-    assert projection['projected_evaluated_adapter_bytes'] == 900
+    assert projection['projected_total_seconds'] == 2604
+    assert projection['projected_evaluated_adapter_bytes'] == 4100
     assert projection['plan']['resumable_checkpoint_writes'] == 40
     assert projection['status'] == 'planning_estimate_requires_longer_gpu_profile_and_review'
     incomplete = full_pool_projection(config, 2000, 120, 3, {})
     assert incomplete['projected_total_seconds'] is None
     assert incomplete['projected_evaluated_adapter_bytes'] is None
+    old_profile = {k: v for k, v in measured.items() if k != 'evaluation_immediate_seconds'}
+    assert full_pool_projection(config, 2000, 120, 3, old_profile)['projected_total_seconds'] is None
+
+
+def test_independent_evaluation_grids_keep_all_measured_adapters_without_extra_generations():
+    config = TrainingConfig(stage='profile', max_steps=7, eval_steps=3, immediate_eval_steps=2)
+    plan = resource_plan(config, 8, 2, 1)
+    assert plan['evaluation_native_steps'] == [0, 3, 6, 7]
+    assert plan['evaluation_immediate_steps'] == [0, 2, 4, 6, 7]
+    assert plan['evaluation_steps'] == [0, 2, 3, 4, 6, 7]
+    assert plan['retained_evaluated_adapters'] == 6
+    assert plan['evaluation_native_generations'] == 8
+    assert plan['evaluation_immediate_forward_calls'] == 10
+    assert resource_plan(config, 8, 0, 1)['retained_evaluated_adapters'] == 0
+    with pytest.raises(ValueError, match='intervals must be positive'):
+        TrainingConfig(immediate_eval_steps=0).validate()
 
 
 @pytest.mark.parametrize('changes', [{'view': 'search'}, {'split': 'confirmation'}, {'dataset': 'shortcut'}, {'answer': 'box'}, {'targets': []}])

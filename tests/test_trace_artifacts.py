@@ -127,3 +127,8 @@ def test_confirmatory_manifest_freezes_precision_and_requires_full_view_panels()
     with pytest.raises(ValueError, match="complete eight-view"):
         prepare_edit_manifest([t for t in traces if t["view"] == "direct"],
                               [r for r in rows if r["view"] == "direct"], stage="confirmatory", half_width=.4)
+    question_dependent = copy.deepcopy(traces)
+    for trace in question_dependent:
+        trace["question_timing"] = "question_dependent"
+    with pytest.raises(ValueError, match="frozen direct-question"):
+        prepare_edit_manifest(question_dependent, rows, stage="confirmatory", half_width=.4)

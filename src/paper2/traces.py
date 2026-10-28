@@ -203,6 +203,8 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stag
         raise ValueError("Confirmatory edit planning needs traces covering the complete evaluation world pool")
     if stage == "confirmatory":
         from .data.world import VIEWS
+        if any(_timing(trace["question_timing"]) != "direct_fixed" for trace in traces):
+            raise ValueError("Confirmatory edits require frozen direct-question traces (direct_fixed)")
         panels, sources = {}, {}
         for row in records.values():
             panels.setdefault(_story_key(row), set()).add(row["view"])
@@ -215,7 +217,8 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stag
     max_worlds = precision["selected_worlds"]
     selected = sorted(sorted(universe, key=lambda world: digest([seed, world]))[:max_worlds])
     selection = {"method": "sha256_seeded_world_rank_v1", "seed": seed, "max_worlds": max_worlds,
-                 "universe_world_ids": universe, "selected_world_ids": selected, "precision": precision}
+                 "universe_world_ids": universe, "selected_world_ids": selected, "precision": precision,
+                 "timing_policy": "direct_fixed_confirmatory" if stage == "confirmatory" else "pilot_diagnostic"}
     entries = {}
     for trace in traces:
         _validate_source_trace(trace)
@@ -262,28 +265,32 @@ def _replace(trace, edit):
     return trace[:start] + edit["new"] + trace[end:]
 
 
-def validate_edit(trace, contract):
+def validate_edit(trace, contract, *, batch_review=None):
     if (contract.get("artifact_id", contract.get("trace_id")) != _artifact_id(trace)
             or contract.get("trace_sha256") != digest(trace["trace"])):
         raise ValueError("Edit manifest is not bound to this exact trace")
     if contract.get("source_checkpoint") != trace.get("source_checkpoint"):
         raise ValueError("Edit manifest source checkpoint changed")
-    if not contract.get("approved") or not contract.get("reviewed_by"):
+    sampled = (batch_review is not None and batch_review.get("approved_contract_hashes", {}).get(
+               contract["artifact_id"]) == digest(contract))
+    if batch_review is not None and not sampled:
+        raise ValueError("Generated edit differs from its sampled-audit approval")
+    if not sampled and (not contract.get("approved") or not contract.get("reviewed_by")):
         raise ValueError("Trace semantic controls require a reviewed edit manifest (G3)")
     semantic, irrelevant = contract["semantic"], contract["irrelevant"]
     _replace(trace["trace"], semantic)
     _replace(trace["trace"], irrelevant)
-    if not semantic.get("only_intended_fact_changed") or not semantic.get("expected_answers"):
+    if (not sampled and not semantic.get("only_intended_fact_changed")) or not semantic.get("expected_answers"):
         raise ValueError("Semantic edit needs an audited intermediate fact and predicted consequences")
     if not semantic.get("fact_before") or not semantic.get("fact_after"):
         raise ValueError("Name the intermediate fact being edited")
-    if not irrelevant.get("irrelevant_to_answers"):
+    if not sampled and not irrelevant.get("irrelevant_to_answers"):
         raise ValueError("Irrelevant edit must be reviewed")
     sem_size = max(len(semantic["old"]), len(semantic["new"]))
     irr_size = max(len(irrelevant["old"]), len(irrelevant["new"]))
     if not .5 <= irr_size / max(sem_size, 1) <= 2:
         raise ValueError("Irrelevant edit must be comparable in text length (0.5–2x)")
-    if not contract["paraphrase"].get("meaning_preserved") or not contract["paraphrase"].get("text"):
+    if (not sampled and not contract["paraphrase"].get("meaning_preserved")) or not contract["paraphrase"].get("text"):
         raise ValueError("Paraphrase must have reviewed preserved meaning")
     for text in (contract["paraphrase"]["text"], semantic["new"], irrelevant["new"]):
         if re.search(r"(?:^|\n)Answer\s*:", text, flags=re.I):
@@ -307,6 +314,9 @@ def _contracts(edits):
                         max_worlds=selection["max_worlds"], half_width=plan["target_half_width"])
         if plan != expected_plan:
             raise ValueError("Edit precision plan was altered")
+        if plan["stage"] == "confirmatory" and (selection.get("timing_policy") != "direct_fixed_confirmatory"
+                or any(_timing(contract["question_timing"]) != "direct_fixed" for contract in edits["edits"])):
+            raise ValueError("Confirmatory edit manifests require the frozen direct-question timing policy")
     result = {}
     for contract in edits["edits"]:
         if contract["artifact_id"] in result:
@@ -317,7 +327,21 @@ def _contracts(edits):
     return result, selection
 
 
-def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=2026, temperature=.7, top_p=.95):
+def _batch_review(edits, audit, *, required=True):
+    if edits and "generation_plan" in edits:
+        if audit is None:
+            if required:
+                raise ValueError("Model-generated controls require their completed preregistered sample audit")
+            return None
+        from .edit_generation import validate_batch_audit
+        return validate_batch_audit(edits, audit)
+    if audit is not None:
+        raise ValueError("Sample audit supplied without a model-generated edit batch")
+    return None
+
+
+def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=2026, temperature=.7, top_p=.95,
+                               edit_audit=None):
     """Generate a continuation ONCE with its source checkpoint, then save it.
 
     The resulting JSONL is the input for both crossed readers. A reader-side
@@ -325,6 +349,7 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
     """
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
+    batch_review = _batch_review(edits, edit_audit)
     if selection is None:
         raise ValueError("Source regeneration requires a preregistered edit manifest")
     seen = set()
@@ -340,7 +365,7 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
         contract = contracts.get(artifact)
         if contract is None:
             raise ValueError(f"Missing edit contract for selected artifact {artifact}")
-        validate_edit(trace, contract)
+        validate_edit(trace, contract, batch_review=batch_review)
         basis = records.get(trace.get("basis_record_id", trace["record_id"]))
         if basis is None:
             raise ValueError("Regeneration requires the original source question record")
@@ -362,6 +387,7 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
                   "source_checkpoint": trace["source_checkpoint"], "basis_record_id": basis["id"],
                   "source_trace_sha256": trace["trace_sha256"], "edit_contract_sha256": digest(contract),
                   "selection_sha256": edits["selection_sha256"], "trace": text, "trace_sha256": digest(text),
+                  "edit_audit_sha256": batch_review["audit_sha256"] if batch_review else None,
                   "regeneration": {"truncated": generated["truncated"],
                                    "forced_delimiter": ANSWER_DELIMITER not in generated["text"],
                                    "generated_tokens": generated["tokens"], "regenerated_by": source,
@@ -372,7 +398,7 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
         yield result
 
 
-def _frozen_regeneration(trace, contract, edits, frozen):
+def _frozen_regeneration(trace, contract, edits, frozen, batch_review=None):
     if frozen is None:
         raise ValueError("Missing frozen source-regenerated artifact; run regenerate-traces before either reader")
     payload = {key: value for key, value in frozen.items() if key != "artifact_sha256"}
@@ -383,6 +409,8 @@ def _frozen_regeneration(trace, contract, edits, frozen):
                 "edit_contract_sha256": digest(contract), "selection_sha256": edits["selection_sha256"]}
     if any(frozen.get(key) != value for key, value in expected.items()):
         raise ValueError("Frozen regeneration is not bound to this source, trace, edit, and subset")
+    if frozen.get("edit_audit_sha256") != (batch_review["audit_sha256"] if batch_review else None):
+        raise ValueError("Frozen regeneration is bound to a different edit audit")
     if frozen["regeneration"].get("regenerated_by") != trace["source"]:
         raise ValueError("Only the trace source may regenerate an edited continuation")
     return frozen["trace"], {**frozen["regeneration"], "artifact_sha256": frozen["artifact_sha256"]}
@@ -390,10 +418,11 @@ def _frozen_regeneration(trace, contract, edits, frozen):
 
 def run_crossed_reader(backend, rows, traces, reader, edits=None,
                        conditions=("original", "own_replay", "own_rerendered", "answer_cue", "none"), *,
-                       regenerated=None):
+                       regenerated=None, edit_audit=None):
     """Read identical saved source text in every cell; never generate here."""
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
+    batch_review = _batch_review(edits, edit_audit, required=bool(set(conditions) & EDIT_CONTROLS))
     if set(conditions) - set(CONTROL_NAMES):
         raise ValueError("Unknown trace control")
     if set(conditions) & EDIT_CONTROLS and selection is None:
@@ -418,7 +447,7 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
         if selected and set(conditions) & EDIT_CONTROLS:
             if contract is None:
                 raise ValueError(f"Missing edit contract for selected artifact {artifact_id}")
-            validate_edit(trace, contract)
+            validate_edit(trace, contract, batch_review=batch_review)
             _validate_oracle_edit(row, contract)
         for condition in conditions:
             if condition in EDIT_CONTROLS and not selected:
@@ -450,7 +479,7 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                     raise ValueError("Semantic edit must predict the evaluated view")
                 text = _replace(text, contract["semantic"])
                 if condition == "semantic_regenerated":
-                    text, regeneration = _frozen_regeneration(trace, contract, edits, frozen.get(artifact_id))
+                    text, regeneration = _frozen_regeneration(trace, contract, edits, frozen.get(artifact_id), batch_review)
             if _timing(trace["question_timing"]) == "direct_fixed" and condition not in ("answer_cue", "none"):
                 fixed_key = (trace["source"], *_story_key(row), condition)
                 if fixed_key in fixed_direct and fixed_direct[fixed_key] != text:
@@ -470,6 +499,10 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                              artifact_id=artifact_id, source_trace_sha256=trace["trace_sha256"],
                              edit_subset_sha256=edits["selection_sha256"] if selected else None,
                              edit_subset_selected=selected,
+                             edit_review_mode=("sampled_model_generated" if batch_review else "individual_human")
+                                 if selected and condition in EDIT_CONTROLS else None,
+                             edit_audit_sha256=batch_review["audit_sha256"] if batch_review and selected else None,
+                             edit_generation_plan_sha256=batch_review["plan_sha256"] if batch_review and selected else None,
                              edit_precision_plan=selection.get("precision") if selected else None,
                              expected_edited_answer=expected if condition in EDIT_CONTROLS else None,
                              expected_summary_answer=expected if summary else None,

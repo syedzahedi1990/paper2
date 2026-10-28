@@ -237,6 +237,8 @@ def _edit_precision_summary(rows, original, seed, samples):
         if plan["stage"] == "confirmatory" and len({row["world_id"] for row in rows}) != plan["selected_worlds"]:
             raise ValueError("Confirmatory targeted-edit results are missing planned worlds")
         if plan["stage"] == "confirmatory":
+            if any(row.get("question_timing") != "direct_fixed" for row in rows):
+                raise ValueError("Primary confirmatory edit precision requires frozen direct-question traces")
             _, incomplete = _joint_patterns(rows)
             if incomplete:
                 raise ValueError("Confirmatory targeted edits require complete eight-view panels")

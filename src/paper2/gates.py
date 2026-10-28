@@ -27,7 +27,7 @@ def verify_evidence(gate, root):
             raise ValueError(f"Gate evidence missing or modified: {item['path']}")
 
 
-def verify_g4_positive_control(gate, root):
+def verify_g4_positive_control(gate, root, *, expected_test_layers=None):
     """Bind G4 to measured, nontrivial residual evidence, never a layer-0 replay.
 
     A named reviewer still judges flat nulls, preservation and useful precision.
@@ -40,6 +40,15 @@ def verify_g4_positive_control(gate, root):
     required = ("path", "sha256", "mask_id", "checkpoint_id")
     if not all(isinstance(selected.get(key), str) and selected[key] for key in required):
         raise ValueError("G4 requires a selected nontrivial residual positive-control evidence file, mask and checkpoint")
+    test_layers = selected.get("test_layers")
+    if (not isinstance(test_layers, list) or not test_layers
+            or any(type(layer) is not int or layer <= 0 for layer in test_layers)
+            or test_layers != list(range(min(test_layers), max(test_layers) + 1))):
+        raise ValueError("G4 requires an explicit contiguous positive_control.test_layers band")
+    if expected_test_layers is not None and test_layers != expected_test_layers:
+        raise ValueError("G4 positive-control test band differs from the frozen calibration band")
+    if selected["mask_id"] != ",".join(map(str, test_layers)):
+        raise ValueError("G4 residual mask must exactly match the declared test band")
     path = Path(root) / selected["path"]
     if not path.is_file() or file_digest(path) != selected["sha256"]:
         raise ValueError("G4 positive-control evidence missing or modified")
@@ -50,7 +59,9 @@ def verify_g4_positive_control(gate, root):
             and row.get("checkpoint_id") == selected["checkpoint_id"]]
     candidates = residual_control_summary(rows)["candidates"]
     if len(candidates) != 1 or not candidates[0]["eligible"]:
-        raise ValueError("G4 requires eligible residual evidence excluding layer zero and retaining downstream attention")
+        raise ValueError("G4 requires eligible residual evidence aligned with the declared K/V test band, excluding layer zero and retaining downstream attention")
+    if candidates[0]["test_layers"] != test_layers:
+        raise ValueError("G4 evidence test band differs from the selected test band")
     effect = candidates[0]["effects"].get("natural|changed_accuracy", {})
     if effect.get("estimate") is None or effect["estimate"] <= 0:
         raise ValueError("G4 residual positive control did not improve changed-view consequence accuracy over own replay")
@@ -82,7 +93,9 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     measured = ("generation_seconds", "update_seconds", "checkpoint_seconds", "peak_cuda_memory_bytes",
                 "generated_tokens", "sampled_completions", "generation_tokens_per_second", "truncation_rate",
                 "evaluation_seconds", "evaluation_panels", "evaluation_native_generations",
-                "evaluation_generated_tokens", "max_evaluated_adapter_bytes")
+                "evaluation_generated_tokens", "max_evaluated_adapter_bytes",
+                "evaluation_native_seconds", "evaluation_immediate_seconds",
+                "evaluation_native_panels", "evaluation_immediate_panels")
     for field in measured:
         value = profile.get(field)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
@@ -91,14 +104,19 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
                                             "sampled_completions", "generation_tokens_per_second")):
         raise ValueError("Profiling must measure actual generation and an optimization update")
     if any(profile[field] <= 0 for field in ("evaluation_seconds", "evaluation_panels",
-                   "evaluation_native_generations", "evaluation_generated_tokens", "max_evaluated_adapter_bytes")):
+                   "evaluation_native_generations", "evaluation_generated_tokens", "max_evaluated_adapter_bytes",
+                   "evaluation_native_seconds", "evaluation_immediate_seconds",
+                   "evaluation_native_panels", "evaluation_immediate_panels")):
         raise ValueError("Profiling must measure native development evaluation and retained-adapter storage")
     if not 0 <= profile["truncation_rate"] <= 1:
         raise ValueError("Profiling truncation rate must be between zero and one")
     if paid_required:
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
-        verify_g4_positive_control(review["gates"]["G4"], path.parent)
+        test_layers = calibration.get("settings", {}).get("g4_test_layers")
+        if test_layers is None:
+            raise ValueError("G4 test band must be declared in frozen calibration settings.g4_test_layers")
+        verify_g4_positive_control(review["gates"]["G4"], path.parent, expected_test_layers=test_layers)
         paid = review.get("paid_compute", {})
         if not paid.get("approved") or not paid.get("approved_by"):
             raise ValueError("Paid 7B runs require the proposal's explicit cost approval after gate review")
@@ -125,6 +143,7 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
     if review["calibration"]["frozen"]:
         raise ValueError("Calibration is already frozen; use a new preregistered experiment lineage")
     from .data import assert_calibration_corpus
+    _validate_frozen_g4_band(settings)
     assert_calibration_corpus(manifest, acknowledged_heuristic_risks=_heuristic_risk_review(manifest, settings))
     review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest),
                              "manifest_path": str(Path(manifest).resolve()), "settings": settings}
@@ -137,6 +156,7 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
 def validate_calibration_manifest(calibration):
     """Old or modified corpora cannot reuse a G0 approval after the generator fix."""
     from .data import assert_calibration_corpus
+    _validate_frozen_g4_band(calibration.get("settings", {}))
     manifest = calibration.get("manifest_path")
     if not manifest or not Path(manifest).is_file():
         raise ValueError("G0 requires a current audited corpus manifest path; recalibrate old lineages")
@@ -158,3 +178,11 @@ def _heuristic_risk_review(manifest, settings):
             or not acknowledgement["rationale"].strip()):
         raise ValueError("G0 residual heuristic review requires accepted=true, the current corpus_hash and a rationale")
     return True
+
+
+def _validate_frozen_g4_band(settings):
+    layers = settings.get("g4_test_layers")
+    if layers is not None and (not isinstance(layers, list) or not layers
+            or any(type(layer) is not int or layer < 1 for layer in layers)
+            or layers != list(range(min(layers), max(layers) + 1))):
+        raise ValueError("Frozen G4 test layers must be a sorted contiguous band starting after layer zero")

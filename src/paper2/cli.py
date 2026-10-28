@@ -79,9 +79,11 @@ def parser():
             run.add_argument("--traces", nargs="+", required=True)
             run.add_argument("--edits", required=True)
             run.add_argument("--seed", type=int, default=2026)
+            run.add_argument("--edit-audit", help="Completed preregistered sample audit for generated controls")
         if command == "crossed":
             run.add_argument("--traces", nargs="+", required=True)
             run.add_argument("--edits")
+            run.add_argument("--edit-audit", help="Same completed sample audit for both readers")
             run.add_argument("--controls", choices=["basic", "full"], default="full")
             run.add_argument("--regenerated", nargs="+", help="Frozen source-generated continuations, shared across readers")
             run.add_argument("--comparison-seed", type=int, help="Paired base/trained comparison replicate; inferred from source traces when possible")
@@ -92,7 +94,9 @@ def parser():
             run.add_argument("--seed", type=int, default=1)
             run.add_argument("--layer-mode", choices=["joint", "single", "both"], default="joint")
             run.add_argument("--residual-control-layers", type=int, nargs="+",
-                             help="Separate preregistered residual band, excluding layer 0, for G4")
+                             help="Additional residual diagnostics; does not declare a G4 test band")
+            run.add_argument("--g4-test-layers", type=int, nargs="+",
+                             help="Frozen contiguous band tested jointly for K, V and its aligned residual control")
             run.add_argument("--donor-model", help="Explicit secondary cross-model analysis on identical input tokens")
             run.add_argument("--donor-adapter")
             run.add_argument("--donor-revision")
@@ -105,6 +109,25 @@ def parser():
     edits.add_argument("--precision-half-width", type=float, default=.10,
                        help="Preregistered 95%% per-arm story-rate interval target; default .10")
     edits.add_argument("--seed", type=int, default=2026)
+    plan = sub.add_parser("plan-edit-generation", help="Freeze editor model, prompt, decoding and audit sample")
+    for flag in ("edits", "model", "revision", "output"):
+        plan.add_argument("--" + flag, required=True)
+    plan.add_argument("--seed", type=int, default=2026)
+    plan.add_argument("--max-new-tokens", type=int, default=2048)
+    plan.add_argument("--audit-sample-size", type=int, default=60)
+    plan.add_argument("--audit-seed", type=int, default=2026)
+    generate_edits = sub.add_parser("generate-edits", help="Generate frozen controls with the preregistered editor")
+    for flag in ("edits", "plan", "output"):
+        generate_edits.add_argument("--" + flag, required=True)
+    generate_edits.add_argument("--traces", nargs="+", required=True)
+    generate_edits.add_argument("--device", default="auto")
+    generate_edits.add_argument("--resume", action="store_true", help="Reuse the existing per-contract journal; never retry unresolved controls")
+    for command in ("prepare-edit-audit", "verify-edit-audit"):
+        audit = sub.add_parser(command)
+        audit.add_argument("--edits", required=True)
+        audit.add_argument("--output", required=True)
+        if command == "verify-edit-audit":
+            audit.add_argument("--audit", required=True)
     analyze = sub.add_parser("analyze")
     analyze.add_argument("kind", choices=["accuracy", "transfer", "crossed", "cues", "components", "opentom", "match"])
     analyze.add_argument("--input", required=True)
@@ -173,6 +196,44 @@ def main(argv=None):
         write_json(args.output, prepare_edit_manifest([r for p in args.traces for r in read_jsonl(p)],
                     read_jsonl(args.input), max_worlds=args.max_worlds, seed=args.seed,
                     stage=args.stage, half_width=args.precision_half_width))
+    elif command == "plan-edit-generation":
+        from .edit_generation import prepare_generation_plan
+        if Path(args.output).exists():
+            raise ValueError("Generation plan already exists; refusing to overwrite preregistration")
+        write_json(args.output, prepare_generation_plan(_json(args.edits), model_id=args.model,
+                     revision=args.revision, seed=args.seed, max_new_tokens=args.max_new_tokens,
+                     audit_sample_size=args.audit_sample_size, audit_seed=args.audit_seed))
+    elif command == "generate-edits":
+        from .edit_generation import generate_edit_controls, _validate_plan
+        from .backend import HFBackend
+        output = Path(args.output)
+        journal = Path(str(output) + ".journal.jsonl")
+        if output.exists():
+            raise ValueError("Generated batch already exists; refusing to repeat or overwrite generation")
+        if journal.exists() != args.resume:
+            raise ValueError("Existing journal requires --resume; a fresh run must omit --resume")
+        plan = _json(args.plan)
+        _validate_plan(plan)
+        completed = read_jsonl(journal) if args.resume else []
+        backend = HFBackend(plan["model"]["id"], device=args.device, revision=plan["model"]["revision"])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with journal.open("a", encoding="utf-8") as stream:
+            def save_contract(contract):
+                import os
+                stream.write(json.dumps(contract, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            result = generate_edit_controls(backend, [r for p in args.traces for r in read_jsonl(p)],
+                         _json(args.edits), plan, on_result=save_contract, completed_results=completed)
+        write_json(output, result)
+    elif command == "prepare-edit-audit":
+        from .edit_generation import prepare_batch_audit
+        if Path(args.output).exists():
+            raise ValueError("Audit file already exists; refusing to overwrite human decisions")
+        write_json(args.output, prepare_batch_audit(_json(args.edits)))
+    elif command == "verify-edit-audit":
+        from .edit_generation import validate_batch_audit
+        write_json(args.output, validate_batch_audit(_json(args.edits), _json(args.audit)))
     elif command == "opentom-import":
         from .opentom import import_opentom
         import_opentom(args.input, args.output, args.source_url)
@@ -221,7 +282,7 @@ def main(argv=None):
             from .traces import regenerate_trace_artifacts
             results = regenerate_trace_artifacts(backend, rows,
                          [r for p in args.traces for r in read_jsonl(p)], args.source,
-                         _json(args.edits), seed=args.seed)
+                         _json(args.edits), seed=args.seed, edit_audit=_json(args.edit_audit) if args.edit_audit else None)
         elif command == "crossed":
             from .traces import run_crossed_reader, CONTROL_NAMES
             conditions = CONTROL_NAMES if args.controls == "full" else ("original", "own_replay", "own_rerendered", "answer_cue", "none")
@@ -237,7 +298,8 @@ def main(argv=None):
                 raise ValueError("Trained reader and source must belong to the same prespecified comparison seed")
             results = run_crossed_reader(backend, rows, source_traces, args.reader,
                                         _json(args.edits) if args.edits else None, conditions,
-                                        regenerated=[r for p in (args.regenerated or []) for r in read_jsonl(p)])
+                                        regenerated=[r for p in (args.regenerated or []) for r in read_jsonl(p)],
+                                        edit_audit=_json(args.edit_audit) if args.edit_audit else None)
         elif command == "components":
             from .interventions import Site, run_component_test
             layers = list(range(backend.model.config.num_hidden_layers)) if args.all_layers else args.layers
@@ -248,7 +310,7 @@ def main(argv=None):
                 donor_backend = HFBackend(args.donor_model, args.donor_adapter, device=args.device, revision=args.donor_revision)
             results = run_component_test(backend, rows, sites, seed=args.seed,
                          layer_mode=args.layer_mode, donor_backend=donor_backend,
-                         residual_control_layers=args.residual_control_layers)
+                         residual_control_layers=args.residual_control_layers, g4_test_layers=args.g4_test_layers)
         elif command == "opentom-evaluate":
             from .opentom import evaluate_opentom
             results = evaluate_opentom(backend, rows, args.reasoning)

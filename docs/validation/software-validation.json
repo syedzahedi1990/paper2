@@ -1,12 +1,15 @@
 {
   "calibration_ready": false,
-  "code_test_config_sha256": "8046f6950d63a14885e4c383a3dfab4e47913df9a9fa58b88c19e98dbb3b9ac1",
+  "code_test_config_hash_method": "SHA256 of compact sorted JSON mapping relative path to file SHA256 for src/tests/configs/scripts and pyproject.toml; excludes Python caches and egg-info",
+  "code_test_config_sha256": "f3c893bfc1346db05c795750b1e2cd57d39473e0f93e76a3cd64c947c218c255",
   "core_environment_without_torch": {
     "errors": 0,
     "failures": 0,
-    "seconds": 28.945,
+    "passed": 183,
+    "seconds": 28.87,
     "skipped": 12,
-    "tests": 160
+    "test_command": "/tmp/paper2-core-review/bin/python -m pytest -q",
+    "tests": 195
   },
   "corpus_hash": "b5344b9ad3ae4864b7052b32bc00c4c8dfdc5d59953d25222b33274754c50919",
   "dependency_check": "pip check: passed",
@@ -19,11 +22,11 @@
   "required_controls_passed": true,
   "requires_heuristic_review": true,
   "research_model_training_run": false,
-  "scope": "CPU unit and genuine tiny-Qwen integration; audit v4 retains measured weak heuristics and requires G0 review; no empirical G0-G4 decisions",
-  "seconds": 37.188,
+  "scope": "CPU unit and genuine tiny-Qwen integration; fixed editor and audit workflow tested with deterministic backends; no research editor-quality validation, pretrained research run or empirical G0-G4 decisions",
+  "seconds": 40.31,
   "skipped": 0,
-  "test_command": "python -m pytest -q --junitxml=/tmp/paper2-v030-tests.xml",
-  "tests": 182,
+  "test_command": ".venv/bin/python -m pytest -q",
+  "tests": 218,
   "validated_stack": {
     "accelerate": "1.8.1",
     "datasets": "3.6.0",
@@ -34,7 +37,8 @@
     "transformers": "4.53.2",
     "trl": "0.20.0"
   },
-  "wheel": "paper2_reasoning_rl-0.3.0-py3-none-any.whl",
-  "wheel_sha256": "a4a6931510f09b343bd4baf219788596c25c4204b8cb11ffc7eb2f58458d03bb",
+  "version": "0.4.0",
+  "wheel": "paper2_reasoning_rl-0.4.0-py3-none-any.whl",
+  "wheel_sha256": "7b221a4875c45776ce03bb30238f7849192e3f3b142282927e5eb5a59f6ad454",
   "windows_ci": "Workflow added; not claimed as executed locally"
 }
