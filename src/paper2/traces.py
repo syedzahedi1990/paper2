@@ -5,7 +5,6 @@ frozen before later consequence questions; ``prequestion`` is a legacy CLI alias
 for that condition, not an instruction to generate a novel story summary.
 """
 from copy import deepcopy
-import re
 
 from .io import digest
 from .prompts import ANSWER_DELIMITER, answer_token_ids, render_prompt
@@ -154,35 +153,53 @@ def collect_traces(backend, rows, source, timing="question_dependent"):
         yield trace
 
 
-def symbolic_edit_prediction(row, value=None):
+def symbolic_edit_prediction(row, value=None, *, stated_location=None):
     """Propose a focal-belief edit and compute all eight consequences.
 
     The reviewer still locates and checks the actual trace span. This helper
     never asserts that a free-form trace expresses only the proposed fact.
     """
-    from .data.world import StoryWorld, VIEWS, answer_label, ordinary_target, rewrite_forecast
+    from .data.world import StoryWorld, VIEWS, LOCATIONS, answer_label, ordinary_target, rewrite_forecast
     world = StoryWorld.from_dict(row["world"])
-    before = ordinary_target(world, "direct")
+    truth_before = ordinary_target(world, "direct")
+    before = truth_before if stated_location is None else stated_location
+    if before not in LOCATIONS:
+        raise ValueError("The trace-stated belief must name a task location")
     value = row["scope_edit_location"] if value is None else value
-    if value == before:
+    if stated_location is not None and value == before:
+        # The initial proposed destination can itself be an incorrect stated belief.
+        # Freeze a deterministic alternative before observing reader responses.
+        value = min((location for location in LOCATIONS if location not in (before, truth_before)),
+                    key=lambda location: digest(["trace_edit_target_v2", world.world_id, before, location]))
+    if value not in LOCATIONS or value == before or (stated_location is not None and value == truth_before):
         raise ValueError("Symbolic edit must change the focal belief")
     subject = " believes that ".join(world.focal_word)
     premise = f"{subject} believes the {world.focal_object} is in the "
-    return {"fact_before": premise + before, "fact_after": premise + value,
+    oracle = {"method": "focal_belief_edit_v1" if stated_location is None else "focal_trace_belief_edit_v2",
+              "world_sha256": digest(row["world"]), "word": list(world.focal_word),
+              "object": world.focal_object, "before": before, "after": value}
+    if stated_location is not None:
+        oracle["truth_before"] = truth_before
+    prediction = {"fact_before": premise + before, "fact_after": premise + value,
             "expected_answers": {view: answer_label(rewrite_forecast(world, view, value, "belief_edit"))
                                  for view in VIEWS},
-            "oracle": {"method": "focal_belief_edit_v1", "world_sha256": digest(row["world"]),
-                       "word": list(world.focal_word), "object": world.focal_object,
-                       "before": before, "after": value}}
+            "oracle": oracle}
+    if stated_location is not None:
+        prediction["expected_before_answers"] = {
+            view: answer_label(rewrite_forecast(world, view, before, "belief_edit")) for view in VIEWS}
+    return prediction
 
 
 def _validate_oracle_edit(row, contract):
     semantic = contract["semantic"]
     oracle = semantic.get("oracle")
     if oracle is not None:
-        expected = symbolic_edit_prediction(row, oracle.get("after"))
+        stated = oracle.get("before") if oracle.get("method") == "focal_trace_belief_edit_v2" else None
+        expected = symbolic_edit_prediction(row, oracle.get("after"), stated_location=stated)
         if any(semantic.get(key) != value for key, value in expected.items()):
             raise ValueError("Semantic edit differs from its symbolic fact or oracle consequences")
+        if stated is not None and semantic.get("stated_location") != stated:
+            raise ValueError("Semantic edit differs from the trace-stated location")
 
 
 def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stage="pilot", half_width=.10):
@@ -235,6 +252,11 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stag
         if not summary and trace["record_id"] in records:
             summary = symbolic_belief_summary(records[trace["record_id"]])
         prediction = symbolic_edit_prediction(records[trace["record_id"]]) if trace["record_id"] in records else {}
+        if prediction:
+            from .data.world import LOCATIONS
+            prediction["trace_edit_options"] = {
+                location: symbolic_edit_prediction(records[trace["record_id"]], stated_location=location)
+                for location in LOCATIONS}
         entries[key] = {"artifact_id": key, "trace_ids": [trace["trace_id"]],
                        "record_ids": [trace["record_id"]], "world_id": trace["world_id"],
                        "source": trace["source"], "source_checkpoint": trace.get("source_checkpoint"),
@@ -292,9 +314,12 @@ def validate_edit(trace, contract, *, batch_review=None):
         raise ValueError("Irrelevant edit must be comparable in text length (0.5–2x)")
     if (not sampled and not contract["paraphrase"].get("meaning_preserved")) or not contract["paraphrase"].get("text"):
         raise ValueError("Paraphrase must have reviewed preserved meaning")
-    for text in (contract["paraphrase"]["text"], semantic["new"], irrelevant["new"]):
-        if re.search(r"(?:^|\n)Answer\s*:", text, flags=re.I):
-            raise ValueError("Answer delimiter leakage in an intermediate trace control")
+    # Preserve a source answer statement, but do not introduce a new one.
+    from .edit_generation import introduced_answer_statements
+    for text in (contract["paraphrase"]["text"], _replace(trace["trace"], semantic),
+                 _replace(trace["trace"], irrelevant)):
+        if introduced_answer_statements(trace["trace"], text):
+            raise ValueError("New answer statement leakage in an intermediate trace control")
 
 
 def _contracts(edits):
@@ -340,6 +365,26 @@ def _batch_review(edits, audit, *, required=True):
     return None
 
 
+def _effective_contract(contract, batch_review):
+    if contract is not None and batch_review is not None:
+        return batch_review["effective_contracts"][contract["artifact_id"]]
+    return contract
+
+
+def _edit_status(contract, batch_review):
+    if contract is None:
+        return None, None
+    if batch_review is None:
+        return ("editable", None) if contract.get("approved") else ("not_assessed", "not_yet_audited")
+    status = contract.get("generation_status")
+    if status == "ready":
+        return "editable", None
+    if status == "not_editable":
+        return contract["reason_code"], contract.get("reason")
+    return "generation_failed", contract.get("reason") or "; ".join(
+        contract.get("generation", {}).get("errors", [])) or "Editor output could not be used"
+
+
 def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=2026, temperature=.7, top_p=.95,
                                edit_audit=None):
     """Generate a continuation ONCE with its source checkpoint, then save it.
@@ -362,9 +407,12 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
             continue
         if trace.get("source_checkpoint") != _checkpoint(backend):
             raise ValueError("Regeneration backend is not the checkpoint that produced the source trace")
-        contract = contracts.get(artifact)
+        contract = _effective_contract(contracts.get(artifact), batch_review)
         if contract is None:
             raise ValueError(f"Missing edit contract for selected artifact {artifact}")
+        if batch_review and _edit_status(contract, batch_review)[0] != "editable":
+            seen.add(artifact)
+            continue
         validate_edit(trace, contract, batch_review=batch_review)
         basis = records.get(trace.get("basis_record_id", trace["record_id"]))
         if basis is None:
@@ -440,17 +488,23 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
         if trace["world_id"] != row["world_id"] or trace["view"] != row["view"]:
             raise ValueError("Source trace is attached to a different evaluation world or view")
         artifact_id = _artifact_id(trace)
-        contract = contracts.get(artifact_id)
+        initial_contract = contracts.get(artifact_id)
+        contract = _effective_contract(initial_contract, batch_review)
         selected = selection is not None and trace["world_id"] in selection["selected_world_ids"]
+        edit_status, edit_status_reason = _edit_status(contract, batch_review) if selected else (None, None)
+        initial_status, initial_reason = _edit_status(initial_contract, batch_review) if selected else (None, None)
         if selection and trace["world_id"] not in selection["universe_world_ids"]:
             raise ValueError("Reader traces fall outside the preregistered world universe")
         if selected and set(conditions) & EDIT_CONTROLS:
             if contract is None:
                 raise ValueError(f"Missing edit contract for selected artifact {artifact_id}")
-            validate_edit(trace, contract, batch_review=batch_review)
-            _validate_oracle_edit(row, contract)
+            if batch_review is None or edit_status == "editable":
+                validate_edit(trace, contract, batch_review=batch_review)
+                _validate_oracle_edit(row, contract)
         for condition in conditions:
             if condition in EDIT_CONTROLS and not selected:
+                continue
+            if condition in EDIT_CONTROLS and batch_review and edit_status != "editable":
                 continue
             replay = condition in ("own_replay", "own_rerendered")
             if replay and (reader != trace["source"] or row["id"] != trace.get("basis_record_id", row["id"])):
@@ -499,12 +553,21 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                              artifact_id=artifact_id, source_trace_sha256=trace["trace_sha256"],
                              edit_subset_sha256=edits["selection_sha256"] if selected else None,
                              edit_subset_selected=selected,
+                             edit_status=edit_status, edit_status_reason=edit_status_reason,
+                             edit_initial_status=initial_status, edit_initial_status_reason=initial_reason,
+                             edit_human_corrected=bool(initial_contract and contract and digest(initial_contract) != digest(contract)),
+                             edit_stated_location=contract["semantic"].get("stated_location") if contract else None,
+                             edit_source_belief_correct=(contract["semantic"]["oracle"]["before"] ==
+                                 contract["semantic"]["oracle"].get("truth_before", contract["semantic"]["oracle"]["before"]))
+                                 if contract and edit_status == "editable" and contract["semantic"].get("oracle") else None,
                              edit_review_mode=("sampled_model_generated" if batch_review else "individual_human")
                                  if selected and condition in EDIT_CONTROLS else None,
                              edit_audit_sha256=batch_review["audit_sha256"] if batch_review and selected else None,
                              edit_generation_plan_sha256=batch_review["plan_sha256"] if batch_review and selected else None,
                              edit_precision_plan=selection.get("precision") if selected else None,
                              expected_edited_answer=expected if condition in EDIT_CONTROLS else None,
+                             expected_before_edit_answer=contract["semantic"].get("expected_before_answers", {}).get(
+                                 row["view"], row["answer"]) if condition in EDIT_CONTROLS else None,
                              expected_summary_answer=expected if summary else None,
                              follows_edit=(answer.prediction == expected) if condition in EDIT_CONTROLS and expected else None,
                              replay_eligible=trace.get("replay_eligible", False),

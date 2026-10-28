@@ -14,7 +14,7 @@ def _seed(row):
     return row.get("comparison_seed", row.get("training_seed", row.get("seed")))
 
 
-def _index(rows):
+def _index(rows, *, require_balanced_seeds=True):
     result = {}
     for row in rows:
         key = (_seed(row), row["world_id"], row["view"], row.get("cue_condition", "clean"), row.get("cue_location", ""))
@@ -24,17 +24,18 @@ def _index(rows):
     panels = defaultdict(set)
     for key in result:
         panels[key[0]].add(key[1:])
-    if len(panels) > 1 and any(panel != next(iter(panels.values())) for panel in panels.values()):
+    if require_balanced_seeds and len(panels) > 1 and any(panel != next(iter(panels.values())) for panel in panels.values()):
         raise ValueError("Every training seed must cover the same complete story/view panel")
     return result
 
 
-def paired_rows(base, other):
+def paired_rows(base, other, *, require_balanced_seeds=True):
     base, other = list(base), list(other)
     seeds = {_seed(r) for r in other}
     if {_seed(r) for r in base} == {None} and seeds and None not in seeds:
         base = [{**r, "training_seed": seed} for seed in seeds for r in base]
-    a, b = _index(base), _index(other)
+    a, b = (_index(base, require_balanced_seeds=require_balanced_seeds),
+            _index(other, require_balanced_seeds=require_balanced_seeds))
     if set(a) != set(b):
         raise ValueError("Paired comparisons require exactly the same worlds, views and cue conditions")
     for key in sorted(a, key=repr):
@@ -43,12 +44,13 @@ def paired_rows(base, other):
         yield a[key], b[key]
 
 
-def _baseline_subset(baseline, observations):
+def _baseline_subset(baseline, observations, *, require_balanced_seeds=True):
     """Select a prespecified control panel, preserving the reader's own baseline."""
     seeds = {_seed(r) for r in observations}
     if {_seed(r) for r in baseline} == {None} and seeds and None not in seeds:
         baseline = [{**r, "comparison_seed": seed} for seed in seeds for r in baseline]
-    left, right = _index(baseline), _index(observations)
+    left, right = (_index(baseline, require_balanced_seeds=require_balanced_seeds),
+                   _index(observations, require_balanced_seeds=require_balanced_seeds))
     if not set(right) <= set(left):
         raise ValueError("Control subset contains questions missing from its reader baseline")
     return [left[key] for key in right]
@@ -132,9 +134,9 @@ def transfer(base, trained, seed=2026):
             "interpretation": "Transfer to direct-answer inference; does not identify stored beliefs."}
 
 
-def trace_benefit(baseline, supplied, seed=2026, samples=2000):
+def trace_benefit(baseline, supplied, seed=2026, samples=2000, *, require_balanced_seeds=True):
     by_world = defaultdict(lambda: [0, 0, 0, 0])
-    for a, b in paired_rows(baseline, supplied):
+    for a, b in paired_rows(baseline, supplied, require_balanced_seeds=require_balanced_seeds):
         ac, bc = a["prediction"] == a["answer"], b["prediction"] == b["answer"]
         v = by_world[a["world_id"]]
         v[0] += int(not ac)
@@ -221,45 +223,138 @@ def _crossed_original_contrasts(baselines, cells, identities, seed=2026, samples
     return output
 
 
-def _edit_precision_summary(rows, original, seed, samples):
-    """Report actual story uncertainty; a small pilot cannot certify precision."""
-    _index(rows)
-    plans = [row.get("edit_precision_plan") for row in rows]
-    plan = plans[0] if plans else None
-    if any(candidate != plan for candidate in plans):
-        raise ValueError("Targeted edits mix different precision plans")
-    if plan is not None:
-        from .precision import edit_precision_plan
-        expected = edit_precision_plan(plan["selected_worlds"], stage=plan["stage"],
-                     max_worlds=plan["selected_worlds"], half_width=plan["target_half_width"])
-        if plan != expected:
-            raise ValueError("Invalid targeted-edit precision plan")
-        if plan["stage"] == "confirmatory" and len({row["world_id"] for row in rows}) != plan["selected_worlds"]:
-            raise ValueError("Confirmatory targeted-edit results are missing planned worlds")
-        if plan["stage"] == "confirmatory":
-            if any(row.get("question_timing") != "direct_fixed" for row in rows):
-                raise ValueError("Primary confirmatory edit precision requires frozen direct-question traces")
-            _, incomplete = _joint_patterns(rows)
-            if incomplete:
-                raise ValueError("Confirmatory targeted edits require complete eight-view panels")
-            if original is not None:
-                worlds = {row["world_id"] for row in rows}
-                list(paired_rows([row for row in original if row["world_id"] in worlds], rows))
+EDIT_STATUSES = ("editable", "belief_not_stated", "contradicted", "ambiguous", "no_safe_control", "generation_failed", "not_assessed")
+EDIT_CONDITIONS = frozenset(("semantic_minimal", "semantic_regenerated", "paraphrase", "irrelevant"))
+
+
+def _source_checkpoint_key(row):
+    from .io import digest
+    return (row.get("source", "unspecified"), digest(row.get("source_checkpoint")),
+            row.get("question_timing", "question_dependent"))
+
+
+def _editability_counts(rows):
+    """Count source artifacts once, despite eight views and two crossed readers."""
+    artifacts = {}
+    for row in rows:
+        status = row.get("edit_status")
+        initial = row.get("edit_initial_status", status)
+        if status not in EDIT_STATUSES or initial not in EDIT_STATUSES:
+            raise ValueError("Selected edit candidates need an explicit supported edit_status")
+        fallback = (_source_checkpoint_key(row), _seed(row), row["world_id"],
+                    row.get("cue_condition"), row.get("cue_location"))
+        key = row.get("artifact_id", fallback)
+        value = (row["world_id"], status, initial, bool(row.get("edit_human_corrected", False)),
+                 row.get("edit_source_belief_correct"))
+        if key in artifacts and artifacts[key] != value:
+            raise ValueError("One source artifact has conflicting editability statuses or correction history")
+        artifacts[key] = value
+
+    def categories(index):
+        return {status: {"artifacts": sum(value[index] == status for value in artifacts.values()),
+                         "worlds": len({value[0] for value in artifacts.values() if value[index] == status})}
+                for status in EDIT_STATUSES}
+
+    final, initial = categories(1), categories(2)
+    return {"candidate_artifacts": len(artifacts),
+            "candidate_worlds": len({value[0] for value in artifacts.values()}),
+            "editable_artifacts": final["editable"]["artifacts"], "editable_worlds": final["editable"]["worlds"],
+            "editable_fraction": final["editable"]["artifacts"] / len(artifacts) if artifacts else None,
+            "categories": final, "initial_categories": initial,
+            "editable_source_belief_correctness": {
+                label: sum(value[1] == "editable" and value[4] is truth for value in artifacts.values())
+                for label, truth in (("correct", True), ("incorrect", False), ("unknown", None))},
+            "human_corrected_artifacts": sum(value[3] for value in artifacts.values()),
+            "correction_history_note": "Initial machine failures remain counted after human correction; final eligibility defines the conditional edit estimand.",
+            "category_world_counts_note": "World counts can overlap categories when multiple cue renderings are selected."}
+
+
+def _editability_summary(cells):
+    """Expose noneditable candidates and support differences, never drop them."""
+    groups = defaultdict(list)
+    for (reader, source, condition, timing), rows in cells.items():
+        if condition != "original":
+            continue
+        for row in rows:
+            if row.get("edit_subset_selected"):
+                if row.get("edit_status") is None and row.get("edit_precision_plan"):
+                    raise ValueError("Selected candidate panel is missing editability status")
+                if row.get("edit_status") is not None:
+                    groups[_source_checkpoint_key(row)].append(row)
+    if not groups:
+        return {"status": "not_recorded", "by_source_checkpoint": {}, "paired_source_support": []}
+    reports, eligible_sets, candidate_sets = {}, {}, {}
+    for key, rows in sorted(groups.items()):
+        label = "|".join(key)
+        plans = [row.get("edit_precision_plan") for row in rows]
+        if any(plan != plans[0] for plan in plans):
+            raise ValueError("Source checkpoint mixes candidate precision plans")
+        plan = plans[0]
+        _validate_edit_precision_plan(plan)
+        report = _editability_counts(rows)
+        support_key = lambda row: (row["world_id"], row.get("cue_condition", "clean"), row.get("cue_location"))
+        eligible_sets[key] = {support_key(row) for row in rows if row["edit_status"] == "editable"}
+        candidate_sets[key] = {support_key(row) for row in rows}
+        if plan and plan["stage"] == "confirmatory":
+            if report["candidate_worlds"] != plan["selected_worlds"]:
+                raise ValueError("Confirmatory editability report is missing planned candidate worlds")
+            # Each reader/comparison replicate must retain every candidate panel.
+            panels = defaultdict(list)
+            for row in rows:
+                panels[(row.get("reader"), _seed(row))].append(row)
+            for panel in panels.values():
+                if len({row["world_id"] for row in panel}) != plan["selected_worlds"]:
+                    raise ValueError("Confirmatory editability replicate is missing candidate worlds")
+                _index(panel)
+                if _joint_patterns(panel)[1]:
+                    raise ValueError("Confirmatory editability needs complete eight-view candidate panels")
+        report.update(source=key[0], source_checkpoint=rows[0].get("source_checkpoint"), question_timing=key[2],
+                      precision_plan=plan,
+                      eligible_count_sufficient=bool(plan and report["editable_worlds"] >= plan["required_worlds"]),
+                      conditional_effect_status="requires_edited_outcomes" if report["editable_worlds"] else (
+                          "awaiting_editability_assessment" if report["categories"]["not_assessed"]["artifacts"]
+                          else "not_estimable_no_editable_worlds"),
+                      precision_requires_measured_intervals=True)
+        reports[label] = report
+    from itertools import combinations
+    support = []
+    for left, right in combinations(sorted(groups), 2):
+        if left[2] != right[2]:
+            continue
+        same_candidates = candidate_sets[left] == candidate_sets[right]
+        common = eligible_sets[left] & eligible_sets[right]
+        identical = same_candidates and eligible_sets[left] == eligible_sets[right]
+        support.append({"left": "|".join(left), "right": "|".join(right),
+                        "candidate_pools_equal": same_candidates,
+                        "left_editable_worlds": len({key[0] for key in eligible_sets[left]}),
+                        "right_editable_worlds": len({key[0] for key in eligible_sets[right]}),
+                        "common_editable_worlds": len({key[0] for key in common}),
+                        "common_world_cue_panels": len(common), "identical_editable_support": identical,
+                        "own_subset_estimands_comparable": identical,
+                        "interpretation": "Primary conditional estimates retain each source's own support. Separate paired_edit_source_comparisons explicitly estimates any shared-support contrast."})
+    return {"status": "reported", "by_source_checkpoint": reports, "paired_source_support": support,
+            "interpretation": "Editability is a separate outcome. Conditional edit effects do not describe absent, contradictory or failed traces."}
+
+
+def _conditional_edit_metrics(rows, original, plan, seed, samples):
     groups = defaultdict(lambda: defaultdict(list))
     for row in rows:
         world = row["world_id"]
         follows = int(row["prediction"] == row["expected_edited_answer"])
         groups["all_predicted_consequences"][world].append(follows)
-        metric = "changed_target_compliance" if row["expected_edited_answer"] != row["answer"] else "intact_target_preservation"
+        metric = "changed_target_compliance" if row["expected_edited_answer"] != row.get("expected_before_edit_answer", row["answer"]) else "intact_target_preservation"
         groups[metric][world].append(follows)
     if original is not None:
-        for before, after in paired_rows(_baseline_subset(original, rows), rows):
-            if after["expected_edited_answer"] != after["answer"]:
+        baseline = _baseline_subset(original, rows, require_balanced_seeds=False)
+        for before, after in paired_rows(baseline, rows, require_balanced_seeds=False):
+            if after["expected_edited_answer"] != after.get("expected_before_edit_answer", after["answer"]):
                 effect = int(after["prediction"] == after["expected_edited_answer"]) - int(
                     before["prediction"] == after["expected_edited_answer"])
                 groups["changed_response_increase_vs_original"][after["world_id"]].append(effect)
     metrics = {}
-    for name, values in groups.items():
+    for name in ("all_predicted_consequences", "changed_target_compliance", "intact_target_preservation",
+                 "changed_response_increase_vs_original"):
+        values = groups[name]
         result = cluster_interval(values, seed=seed, samples=samples)
         half_width = max(abs(endpoint - result["estimate"]) for endpoint in result["ci95"]) if result["ci95"] else None
         is_rate = name != "changed_response_increase_vs_original"
@@ -269,9 +364,82 @@ def _edit_precision_summary(rows, original, seed, samples):
                           and half_width <= plan["target_half_width"]),
                       covered_by_rate_sample_plan=is_rate)
         metrics[name] = result
-    return {"plan": plan, "metrics": metrics,
-            "interpretation": "Fixed seeds and views averaged within story. The 12-world pilot is diagnostic. "
-                              "Rate planning does not size paired differences or ratios; no automatic quadrant label."}
+    return metrics
+
+
+def _validate_edit_precision_plan(plan):
+    if plan is not None:
+        from .precision import edit_precision_plan
+        expected = edit_precision_plan(plan["selected_worlds"], stage=plan["stage"],
+                     max_worlds=plan["selected_worlds"], half_width=plan["target_half_width"])
+        if plan != expected:
+            raise ValueError("Invalid targeted-edit precision plan")
+
+
+def _edit_precision_summary(rows, original, seed, samples):
+    """Conditional edit precision uses actual eligible stories in every checkpoint."""
+    _index(rows, require_balanced_seeds=False)
+    candidates = [row for row in original or () if row.get("edit_subset_selected")]
+    plans = [row.get("edit_precision_plan") for row in rows + candidates]
+    plan = plans[0] if plans else None
+    if any(candidate != plan for candidate in plans):
+        raise ValueError("Targeted edits mix different precision plans")
+    _validate_edit_precision_plan(plan)
+    explicit_status = bool(candidates) or any(row.get("edit_status") is not None for row in rows)
+    if plan and plan["stage"] == "confirmatory":
+        if not candidates:
+            raise ValueError("Confirmatory targeted edits require the complete candidate editability panel")
+        if any(row.get("question_timing") != "direct_fixed" for row in rows + candidates):
+            raise ValueError("Primary confirmatory edit precision requires frozen direct-question traces")
+        # Keep the original candidate panel balanced across training seeds.
+        _index(candidates)
+        candidate_groups = defaultdict(list)
+        for row in candidates:
+            candidate_groups[_source_checkpoint_key(row)].append(row)
+        for group in candidate_groups.values():
+            if len({row["world_id"] for row in group}) != plan["selected_worlds"]:
+                raise ValueError("Confirmatory targeted-edit results are missing planned candidate worlds")
+            if _joint_patterns(group)[1]:
+                raise ValueError("Confirmatory targeted edits require complete eight-view candidate panels")
+    if explicit_status:
+        if any(row.get("edit_status") != "editable" for row in rows):
+            raise ValueError("Actual edit outcomes must be explicitly editable")
+        _editability_counts(candidates)
+        eligible = [row for row in candidates if row["edit_status"] == "editable"]
+        observed = _index(rows, require_balanced_seeds=False)
+        expected = _index(eligible, require_balanced_seeds=False)
+        if set(observed) != set(expected):
+            raise ValueError("Edited outcomes must cover every editable candidate exactly once; no silent world loss")
+        if any(_source_checkpoint_key(observed[key]) != _source_checkpoint_key(expected[key])
+               or observed[key].get("artifact_id") != expected[key].get("artifact_id") for key in observed):
+            raise ValueError("Edited outcomes changed their candidate source or artifact identity")
+    if plan and plan["stage"] == "confirmatory" and _joint_patterns(rows)[1]:
+        raise ValueError("Confirmatory targeted edits require complete eight-view panels")
+    metrics = _conditional_edit_metrics(rows, original, plan, seed, samples)
+    groups, candidate_groups = defaultdict(list), defaultdict(list)
+    for row in rows:
+        groups[_source_checkpoint_key(row)].append(row)
+    for row in candidates:
+        candidate_groups[_source_checkpoint_key(row)].append(row)
+    checkpoints = {}
+    for key in sorted(set(groups) | set(candidate_groups)):
+        selected = groups[key]
+        subgroup = _conditional_edit_metrics(selected, original, plan, seed, samples)
+        counts = _editability_counts(candidate_groups[key]) if explicit_status else {
+            "candidate_worlds": None, "editable_worlds": len({row["world_id"] for row in selected})}
+        checkpoints["|".join(key)] = {"source_checkpoint": (selected or candidate_groups[key])[0].get("source_checkpoint"),
+                                     "editability": counts, "metrics": subgroup}
+    # Pooled support can exceed each source seed's support. It cannot certify
+    # precision when an individual checkpoint's conditional estimate is weak.
+    for name, result in metrics.items():
+        result["confirmatory_precision_ready"] = result["confirmatory_precision_ready"] and all(
+            report["metrics"][name]["confirmatory_precision_ready"] for report in checkpoints.values())
+    return {"plan": plan, "metrics": metrics, "by_source_checkpoint": checkpoints,
+            "editability": _editability_counts(candidates) if explicit_status else None,
+            "estimand": "Compliance or preservation conditional on the source trace being editable",
+            "interpretation": "Fixed views and available replicates averaged within story; checkpoint-specific eligible sets and intervals are reported. "
+                              "Candidate stories never substitute for editable stories. Rate planning does not size paired differences, "
+                              "different-support source comparisons, or ratios; no automatic quadrant label."}
 
 
 def _trace_control_summary(cells, seed=2026, samples=2000):
@@ -280,6 +448,7 @@ def _trace_control_summary(cells, seed=2026, samples=2000):
         reader, source, condition, timing = key
         if condition == "original":
             continue
+        conditional = condition in EDIT_CONDITIONS
         summary = {"n": len(rows)}
         if condition in ("own_replay", "own_rerendered"):
             eligible = [r for r in rows if r.get("replay_eligible", False)]
@@ -296,7 +465,8 @@ def _trace_control_summary(cells, seed=2026, samples=2000):
             original = cells.get((reader, source, "original", timing))
             summary["original_comparison_available"] = original is not None
             if original is not None:
-                pairs = list(paired_rows(_baseline_subset(original, rows), rows))
+                pairs = list(paired_rows(_baseline_subset(original, rows, require_balanced_seeds=not conditional),
+                                         rows, require_balanced_seeds=not conditional))
                 same_output = lambda a, b: (a["token_id"] == b["token_id"]
                     if "token_id" in a and "token_id" in b else
                     a["prediction"] is not None and a["prediction"] == b["prediction"])
@@ -311,16 +481,66 @@ def _trace_control_summary(cells, seed=2026, samples=2000):
                     raise ValueError("Targeted edit summaries require an explicit predicted consequence")
                 summary["predicted_consequence_rate"] = float(np.mean([
                     r["prediction"] == r["expected_edited_answer"] for r in rows])) if rows else None
-                changed = [r for r in rows if r["expected_edited_answer"] != r["answer"]]
-                intact = [r for r in rows if r["expected_edited_answer"] == r["answer"]]
+                changed = [r for r in rows if r["expected_edited_answer"] != r.get("expected_before_edit_answer", r["answer"])]
+                intact = [r for r in rows if r["expected_edited_answer"] == r.get("expected_before_edit_answer", r["answer"])]
                 summary["changed_target_n"] = len(changed)
                 summary["changed_target_compliance"] = float(np.mean([
                     r["prediction"] == r["expected_edited_answer"] for r in changed])) if changed else None
                 summary["intact_target_n"] = len(intact)
                 summary["intact_target_preservation"] = float(np.mean([
-                    r["prediction"] == r["answer"] for r in intact])) if intact else None
+                    r["prediction"] == r["expected_edited_answer"] for r in intact])) if intact else None
                 summary["story_precision"] = _edit_precision_summary(rows, original, seed, samples)
         output["|".join(key)] = summary
+    return output
+
+
+def _paired_edit_source_comparisons(cells, seed=2026, samples=2000):
+    """Explicit supplemental paired contrasts on shared editable observations.
+
+    This deliberately does not replace each source's own conditional estimand.
+    Shared support is model-dependent and is neither random nor a causal design.
+    """
+    from itertools import combinations
+    grouped = defaultdict(lambda: defaultdict(list))
+    for (reader, source, condition, timing), rows in cells.items():
+        if condition not in ("semantic_minimal", "semantic_regenerated"):
+            continue
+        for row in rows:
+            if row.get("edit_status") == "editable":
+                grouped[(reader, condition, timing)][_source_checkpoint_key(row)].append(row)
+    output = []
+    for (reader, condition, timing), sources in sorted(grouped.items()):
+        for left_key, right_key in combinations(sorted(sources), 2):
+            left = _index(sources[left_key], require_balanced_seeds=False)
+            right = _index(sources[right_key], require_balanced_seeds=False)
+            shared = set(left) & set(right)
+            groups = defaultdict(lambda: defaultdict(list))
+            for key in sorted(shared, key=repr):
+                a, b = left[key], right[key]
+                if a["answer"] != b["answer"]:
+                    raise ValueError("Paired edited sources have different ordinary targets")
+                difference = int(b["prediction"] == b["expected_edited_answer"]) - int(
+                    a["prediction"] == a["expected_edited_answer"])
+                world = a["world_id"]
+                groups["all_predicted_consequences"][world].append(difference)
+                changed_a = a["expected_edited_answer"] != a.get("expected_before_edit_answer", a["answer"])
+                changed_b = b["expected_edited_answer"] != b.get("expected_before_edit_answer", b["answer"])
+                if changed_a and changed_b:
+                    groups["changed_for_both_sources"][world].append(difference)
+                elif not changed_a and not changed_b:
+                    groups["intact_for_both_sources"][world].append(difference)
+            output.append({"reader": reader, "condition": condition, "question_timing": timing,
+                           "left": "|".join(left_key), "right": "|".join(right_key),
+                           "status": "estimated_on_common_support" if shared else "no_common_editable_support",
+                           "left_editable_worlds": len({row["world_id"] for row in left.values()}),
+                           "right_editable_worlds": len({row["world_id"] for row in right.values()}),
+                           "common_records": len(shared), "common_worlds": len({left[key]["world_id"] for key in shared}),
+                           "common_comparison_seeds": sorted({key[0] for key in shared}, key=repr),
+                           "metrics": {name: cluster_interval(values, seed, samples) for name, values in groups.items()},
+                           "estimand": "Right-minus-left edit compliance on the explicitly reported shared editable world/view/cue/comparison-seed panel",
+                           "confirmatory_precision_ready": False,
+                           "interpretation": "Supplemental paired conditional comparison; the rate sample plan does not size differences. "
+                                             "Eligibility is model-dependent; do not generalize this contrast to all candidates or call it a causal arm effect."})
     return output
 
 
@@ -361,8 +581,13 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
             raise ValueError(f"Missing own no-trace baseline for {key[0]}")
         # Primary original cells need the full panel. Reviewed edit controls and
         # fixed-direct replay use their explicitly recorded subsets.
-        baseline = baselines[key[0]] if key[2] == "original" else _baseline_subset(baselines[key[0]], rows)
-        output["|".join(key)] = trace_benefit(baseline, rows, seed=seed, samples=samples)
+        conditional = key[2] in EDIT_CONDITIONS
+        baseline = baselines[key[0]] if key[2] == "original" else _baseline_subset(
+            baselines[key[0]], rows, require_balanced_seeds=not conditional)
+        output["|".join(key)] = trace_benefit(baseline, rows, seed=seed, samples=samples,
+                                            require_balanced_seeds=not conditional)
+        if conditional:
+            output["|".join(key)]["estimand_scope"] = "Source-specific editable subset; eligibility may differ across checkpoints"
         output["|".join(key)]["evaluated_records"] = len(rows)
     identities = (base_reader, trained_reader, base_source, trained_source)
     if all(value is None for value in identities):
@@ -381,9 +606,11 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
     else:
         contrasts = {"status": "identities_required", "reason": "Supply unambiguous base/trained reader and source labels"}
     return {"cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells, seed, samples),
+            "editability": _editability_summary(cells),
+            "paired_edit_source_comparisons": _paired_edit_source_comparisons(cells, seed, samples),
             "identities": dict(zip(("base_reader", "trained_reader", "base_source", "trained_source"), identities)),
             "supplied_text_identity_verified": bool(supplied),
-            "uncertainty": "Whole-story bootstrap after averaging fixed-seed error/repair counts within story; no inference over a population of seeds.",
+            "uncertainty": "Whole-story bootstrap with complete fixed-seed panels for original traces; conditional edit panels report available eligible replicates and checkpoint-specific intervals. No inference over a population of seeds.",
             "interpretation": "Reader/source interaction is not a fraction of gain stored in a trace."}
 
 

@@ -8,7 +8,7 @@ from paper2.backend import Answer
 from paper2.data.world import generate_world, render_record, ordinary_target, answer_label, VIEWS
 from paper2.io import digest
 from paper2.traces import (prepare_edit_manifest, run_crossed_reader, symbolic_belief_summary,
-                           _contracts, validate_edit)
+                           _contracts, validate_edit, symbolic_edit_prediction, _validate_oracle_edit)
 
 
 def trace_record(world, view="direct", source="base"):
@@ -121,7 +121,7 @@ def test_confirmatory_manifest_freezes_precision_and_requires_full_view_panels()
     rows, traces = zip(*pairs)
     manifest = prepare_edit_manifest(traces, rows, stage="confirmatory", half_width=.4)
     assert manifest["selection"]["precision"]["required_worlds"] == 7
-    assert len(manifest["edits"]) == 7
+    assert len(manifest["edits"]) == 10  # All candidates provide headroom for uneditable traces.
     assert all(edit["semantic"]["oracle"]["method"] == "focal_belief_edit_v1" for edit in manifest["edits"])
     _contracts(manifest)
     with pytest.raises(ValueError, match="complete eight-view"):
@@ -132,3 +132,34 @@ def test_confirmatory_manifest_freezes_precision_and_requires_full_view_panels()
         trace["question_timing"] = "question_dependent"
     with pytest.raises(ValueError, match="frozen direct-question"):
         prepare_edit_manifest(question_dependent, rows, stage="confirmatory", half_width=.4)
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+@pytest.mark.parametrize("kind", ["move", "tell"])
+def test_trace_belief_options_keep_truth_separate_and_forecast_from_stated_belief(depth, kind):
+    from paper2.data.world import LOCATIONS, rewrite_forecast
+    world = generate_world(random.Random(123), depth=depth, event_kind=kind)
+    row, trace = trace_record(world)
+    contract = prepare_edit_manifest([trace], [row])["edits"][0]
+    options = contract["semantic"]["trace_edit_options"]
+    assert set(options) == set(LOCATIONS)
+    truth = ordinary_target(world, "direct")
+    for stated, option in options.items():
+        oracle = option["oracle"]
+        assert oracle["before"] == stated
+        assert oracle["truth_before"] == truth
+        assert oracle["after"] not in (truth, stated)
+        assert option["expected_before_answers"]["direct"] == answer_label(stated)
+        assert option["expected_answers"] == {
+            view: answer_label(rewrite_forecast(world, view, oracle["after"], "belief_edit")) for view in VIEWS}
+        selected = copy.deepcopy(contract)
+        selected["semantic"].update(option, stated_location=stated)
+        _validate_oracle_edit(row, selected)
+        changed = copy.deepcopy(selected)
+        changed["semantic"]["expected_before_answers"]["direct"] = "invalid"
+        with pytest.raises(ValueError, match="oracle consequences"):
+            _validate_oracle_edit(row, changed)
+    wrong = next(location for location in LOCATIONS if location != truth)
+    after = next(location for location in LOCATIONS if location not in (truth, wrong))
+    assert symbolic_edit_prediction(row, after, stated_location=wrong)["expected_answers"] == \
+        symbolic_edit_prediction(row, after)["expected_answers"]

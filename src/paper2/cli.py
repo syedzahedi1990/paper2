@@ -104,7 +104,7 @@ def parser():
     edits.add_argument("--traces", nargs="+", required=True)
     edits.add_argument("--output", required=True)
     edits.add_argument("--input", required=True, help="Evaluation rows with symbolic worlds")
-    edits.add_argument("--max-worlds", type=int, help="Pilot defaults to 12; confirmatory defaults to precision requirement")
+    edits.add_argument("--max-worlds", type=int, help="Pilot defaults to 12; confirmatory uses all candidate worlds")
     edits.add_argument("--stage", choices=["pilot", "confirmatory"], default="pilot")
     edits.add_argument("--precision-half-width", type=float, default=.10,
                        help="Preregistered 95%% per-arm story-rate interval target; default .10")
@@ -114,14 +114,17 @@ def parser():
         plan.add_argument("--" + flag, required=True)
     plan.add_argument("--seed", type=int, default=2026)
     plan.add_argument("--max-new-tokens", type=int, default=2048)
-    plan.add_argument("--audit-sample-size", type=int, default=60)
+    plan.add_argument("--audit-sample-size", type=int, default=100)
     plan.add_argument("--audit-seed", type=int, default=2026)
+    plan.add_argument("--max-audit-errors", type=int, default=1)
+    plan.add_argument("--max-error-rate", type=float, default=.05)
+    plan.add_argument("--audit-confidence", type=float, default=.95)
     generate_edits = sub.add_parser("generate-edits", help="Generate frozen controls with the preregistered editor")
     for flag in ("edits", "plan", "output"):
         generate_edits.add_argument("--" + flag, required=True)
     generate_edits.add_argument("--traces", nargs="+", required=True)
     generate_edits.add_argument("--device", default="auto")
-    generate_edits.add_argument("--resume", action="store_true", help="Reuse the existing per-contract journal; never retry unresolved controls")
+    generate_edits.add_argument("--resume", action="store_true", help="Reuse the existing per-contract journal without resampling finished outputs")
     for command in ("prepare-edit-audit", "verify-edit-audit"):
         audit = sub.add_parser(command)
         audit.add_argument("--edits", required=True)
@@ -202,7 +205,9 @@ def main(argv=None):
             raise ValueError("Generation plan already exists; refusing to overwrite preregistration")
         write_json(args.output, prepare_generation_plan(_json(args.edits), model_id=args.model,
                      revision=args.revision, seed=args.seed, max_new_tokens=args.max_new_tokens,
-                     audit_sample_size=args.audit_sample_size, audit_seed=args.audit_seed))
+                     audit_sample_size=args.audit_sample_size, audit_seed=args.audit_seed,
+                     max_audit_errors=args.max_audit_errors, max_error_rate=args.max_error_rate,
+                     audit_confidence=args.audit_confidence))
     elif command == "generate-edits":
         from .edit_generation import generate_edit_controls, _validate_plan
         from .backend import HFBackend

@@ -94,27 +94,28 @@ paper2 prepare-edits --traces runs/traces-base.jsonl runs/traces-trained.jsonl \
   --stage pilot --max-worlds 12 --seed 2026 --output runs/edit-templates.json
 ```
 
-The pilot defaults to 12 worlds selected by seeded world-ID rank, never by performance. For confirmation, use confirmation rows, all intended source files, and `--stage confirmatory --precision-half-width .10` without `--max-worlds`: the approximate rate-precision plan selects 97 worlds and requires complete eight-view `direct_fixed` panels for every source. Actual story intervals must also pass; the plan does not size arm differences or remaining-error ratios. Include the base once in the full-grid manifest. For 24 trained checkpoints plus the base, this gives 2,425 contracts instead of 19,400 question-dependent contracts; additional checkpoints or cue renderings increase the workload.
+The pilot defaults to 12 worlds selected by seeded world-ID rank, never by performance. For confirmation, use confirmation rows, all intended source files, and `--stage confirmatory --precision-half-width .10` without `--max-worlds`: the plan selects all 120 candidate worlds and requires complete eight-view `direct_fixed` panels for every source. The approximate ±.10 rate target still requires at least 97 editable stories per checkpoint and sufficiently narrow actual intervals; candidate headroom does not guarantee this. The plan does not size arm differences or remaining-error ratios. Include the base once in the full-grid manifest. For 24 trained checkpoints plus the base, this gives 3,000 contracts instead of 24,000 question-dependent contracts; additional checkpoints or cue renderings increase the workload.
 
-The oracle proposes the focal-belief change and all eight consequences. A fixed editor generates paraphrases, comparable irrelevant edits and the exact span for the proposed fact edit. Freeze its model revision, prompt, decoding and human audit sample before generation. The editor below is an example requiring pilot validation, not an assurance of adequate editing quality:
+The oracle freezes a before/after forecast option for every possible stated focal-belief location. The fixed editor locates the final belief actually expressed, even if it is wrong, and generates a paraphrase, a comparable irrelevant edit and the exact factual substitution. Missing, contradictory or ambiguous beliefs, unavailable safe controls and operational generation failures remain explicit per-source outcomes. They supply no edit controls but stay in the candidate denominator. Freeze the editor revision, prompt, decoding, human audit sample and acceptance thresholds before generation. The editor below is an example requiring pilot validation, not an assurance of adequate editing quality:
 
 ```bash
 paper2 plan-edit-generation --edits runs/edit-templates.json \
   --model Qwen/Qwen2.5-7B-Instruct --revision a09a35458c702b33eeacc393d103063234e8bc28 \
-  --audit-sample-size 60 --audit-seed 2026 --output runs/edit-generation-plan.json
+  --audit-sample-size 100 --audit-seed 2026 --max-audit-errors 1 \
+  --max-error-rate .05 --audit-confidence .95 --output runs/edit-generation-plan.json
 paper2 generate-edits --edits runs/edit-templates.json --plan runs/edit-generation-plan.json \
   --traces runs/traces-base.jsonl runs/traces-trained.jsonl --output runs/generated-edits.json
 paper2 prepare-edit-audit --edits runs/generated-edits.json --output runs/edit-audit.json
 ```
 
-A human completes the preregistered audit: 60 globally sampled contracts by default, plus source/checkpoint coverage supplements; a smaller batch is reviewed in full. Check paraphrase meaning, the intended factual substitution, irrelevant-edit neutrality and the oracle forecasts. Record the named reviewers, each required check and explicit batch acceptance, then verify it:
+A human completes the preregistered audit: 100 globally sampled contracts by default, plus source/checkpoint coverage supplements; a smaller batch is reviewed in full. Check editability classification (or correct recording of an operational failure) and the applicable control checks. At most one originally flawed sampled contract is allowed by default, and the exact one-sided 95% upper bound on the global candidate error rate must be at most 5%. Correct sampled flaws in the audit record, retaining the original failed judgments and recording the correction, reviewer and completed re-review. Original flaws still count after repair. Record explicit batch acceptance, then verify it:
 
 ```bash
 paper2 verify-edit-audit --edits runs/generated-edits.json --audit runs/edit-audit.json \
   --output runs/edit-audit-evidence.json
 ```
 
-Unsampled contracts remain individually unapproved; this is sampled quality assurance for the frozen batch. Any unresolved output or failed/missing audit item blocks the batch. Do not drop difficult traces or retry until the audit passes. Interrupted generation can reuse the exact completed journal with `generate-edits --resume`; unresolved completed outputs are not regenerated. See [model-generated edit protocol](EDIT_GENERATION.md) for the fixed prompt, provenance, sampling assumptions and failure policy. The individually reviewed path remains available for pilot diagnostics. Full-state belief summaries are positive controls for use of a correct premise, not model-produced summaries; see [trace protocol](TRACES.md). `--controls basic` supports an early diagnostic but cannot complete G3.
+Unsampled contracts remain individually unapproved; this is sampled quality assurance for the frozen batch. Uneditable or failed generation outcomes do not alone block the batch. Missing judgments, uncorrected sampled flaws, excessive original failures, inadequate global assurance or altered provenance do. The eligible-subset bound is reported separately; a global 5% bound is not a per-arm or automatically an eligible-control bound. Do not drop difficult candidates or retry until the audit passes. Interrupted generation reuses the exact completed journal with `generate-edits --resume`; finished outputs are not regenerated. See [model-generated edit protocol](EDIT_GENERATION.md) for the fixed prompt, provenance, sampling assumptions and failure policy. The individually reviewed path remains available for pilot diagnostics. Full-state belief summaries are positive controls for use of a correct premise, not model-produced summaries; see [trace protocol](TRACES.md). `--controls basic` supports an early diagnostic but cannot complete G3.
 
 Generate edited continuations once with **each original source checkpoint**, before either reader, using the same generated batch and completed audit:
 
@@ -139,7 +140,7 @@ paper2 crossed --input data/generated/pilot-audit-v4/evaluation/development__cle
   --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --output runs/crossed-trained.jsonl
 ```
 
-Both readers consume identical saved control text and continuations. The direct trace is written before later questions/events are shown and held fixed across views; no novel story-summary prompt is used. `prequestion` remains an alias for `direct_fixed`. Question-dependent timing is a pilot or supplemental diagnostic: collect it with `--timing question_dependent` and separate artifact/edit files. It cannot replace the primary confirmatory edit measurement. Raw-token replay and re-rendered replay retain separate eligibility and match rates.
+Both readers consume identical effective controls, including recorded human corrections, and the same source-frozen continuations. All candidates retain original rows with final and initial edit-status fields; uneditable/failed candidates require no semantic regeneration. Report editability rates by source/checkpoint and conditional targeted-effect estimates with candidate, eligible and common-support denominators. Changed/intact forecasts use the stated-before versus stated-after belief; ordinary accuracy still uses the true world. The direct trace is written before later questions/events are shown and held fixed across views; no novel story-summary prompt is used. `prequestion` remains an alias for `direct_fixed`. Question-dependent timing is a pilot or supplemental diagnostic: collect it with `--timing question_dependent` and separate artifact/edit files. It cannot replace the primary confirmatory edit measurement. Raw-token replay and re-rendered replay retain separate eligibility and match rates.
 
 Run one base/trained seed pair at a time. `crossed` infers `comparison_seed` from the trained source trace, or accepts an explicit `--comparison-seed`. It records reader and source seeds separately. Combine the three paired result files for the confirmatory analysis; shared base baselines are reused and fixed seeds are averaged within each story. Bootstrap intervals reflect stories, not a population of training seeds.
 
@@ -152,25 +153,41 @@ paper2 analyze crossed --baseline runs/baselines.jsonl \
 
 ## 5. Test 3
 
-Preregister an architecture-appropriate contiguous test band and use that **same band for joint K, V and residual swaps**. `--g4-test-layers` declares this alignment; `--residual-control-layers` adds diagnostics only and cannot certify G4. The numerical band below is an example requiring preregistration and measured validation, not a claim of successful G4 or a transfer of Paper 1's 72B layer numbers to 3B/7B:
+Preregister an architecture-appropriate contiguous test band and use that **same band for joint K, V and residual swaps**. Start with a broad band from an early interior block through the last block when assessing a possible distributed effect; a narrow band can miss such an effect. `--g4-test-layers` declares the alignment; `--residual-control-layers` adds diagnostics only and cannot certify G4. The pinned [3B configuration](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct/raw/aa8e72537993ba99e69dfaafa59ed015b17504d1/config.json) has 36 decoder blocks, indexed 0–35. The example below therefore uses 6–35. The start at 6 is an illustrative choice to calibrate and freeze, not an empirically validated threshold or an architectural transfer of Paper 1's 72B band:
 
 ```bash
 paper2 components --input data/generated/pilot-audit-v4/pairs/development.jsonl \
-  --layers 6 7 8 9 10 11 --g4-test-layers 6 7 8 9 10 11 \
+  --model Qwen/Qwen2.5-3B-Instruct \
+  --layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 \
+  --g4-test-layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 \
   --output runs/components-base.jsonl
 paper2 components --input data/generated/pilot-audit-v4/pairs/development.jsonl \
+  --model Qwen/Qwen2.5-3B-Instruct \
   --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 \
-  --layers 6 7 8 9 10 11 --g4-test-layers 6 7 8 9 10 11 \
+  --layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 \
+  --g4-test-layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 \
   --output runs/components-trained.jsonl
 paper2 analyze components --baseline runs/components-base.jsonl \
   --input runs/components-trained.jsonl --output runs/component-changes.json
 ```
 
-All selected layers are swapped **simultaneously** for K, V and residual separately (`--layer-mode joint`, the default). A full-depth K/V experiment remains available with `--all-layers`; supplying `--g4-test-layers` adds the aligned interior K/V/residual band as well. G4 evidence applies to the declared interior band, not an unrelated mask. `--layer-mode both` adds single-layer diagnostics without replacing the joint intervention. A layer-1 residual diagnostic cannot stand in for a test band beginning at layer 6.
+The pinned 7B architecture has 28 blocks, indexed 0–27. For a separately preregistered 7B band with the same illustrative start, use 6–27 for both masks, not the 3B list. For example:
+
+```bash
+paper2 components --model Qwen/Qwen2.5-7B-Instruct \
+  --input data/generated/pilot-audit-v4/pairs/development.jsonl \
+  --layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 \
+  --g4-test-layers 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 \
+  --output runs/components-base-7b.jsonl
+```
+
+Use that same 7B model and both layer lists for each corresponding trained-adapter run. These commands are experiment examples, not authorization to run paid 7B jobs before gate and cost review.
+
+All selected layers are swapped **simultaneously** for K, V and residual separately (`--layer-mode joint`, the default). A full-depth K/V experiment remains available with `--all-layers`; supplying `--g4-test-layers` adds the aligned interior K/V/residual band as well. G4 evidence applies to the declared interior band, not an unrelated mask. A null in a narrow diagnostic band such as 6–11 cannot support a general claim that critical-token keys or values have no effect, even when that band's residual control succeeds. `--layer-mode both` adds single-layer diagnostics without replacing the joint intervention. A layer-1 residual diagnostic cannot stand in for a test band beginning at layer 6.
 
 K/V capture is after projection/bias and before rotary application, preserving native GQA/RoPE computation. The residual site is the decoder block output. Receipts include exact positions, heads, source checkpoint and payload hashes. Analysis calls `score_consequence_pattern` and reports changed/intact accuracy, joint correctness, before/after effects and view-specific probability contrasts. Required-change masks come from the oracle for each matched world; ordinary Test 1 belief-edit scope is a distinct definition.
 
-Freeze `settings.g4_test_layers` before outcomes. G4's selected raw evidence must include the exact same list in `positive_control.test_layers`, alongside `path`, `sha256`, `mask_id` and `checkpoint_id`. For the example, `test_layers` is `[6, 7, 8, 9, 10, 11]` and `mask_id` is `"6,7,8,9,10,11"`. Include that same component JSONL in the gate's hashed evidence. The gate requires residual and K/V receipts aligned to the frozen band, complete natural/own/null panels and a positive changed-consequence residual effect. Masks including layer zero, final-block-only masks without downstream attention, and mismatched or undeclared bands are ineligible regardless of score. A reviewer still evaluates intact consequences, nulls and precision before interpreting small effects; software tests do not confer a G4 pass.
+Freeze the model-specific `settings.g4_test_layers` before outcomes. G4's selected raw evidence must include the exact same list in `positive_control.test_layers`, alongside `path`, `sha256`, `mask_id` and `checkpoint_id`. For the 3B example, both lists contain every integer from 6 through 35 and `mask_id` is their comma-separated form; the 7B example ends at 27. Include that same component JSONL in the gate's hashed evidence. The gate requires residual and K/V receipts aligned to the frozen band, complete natural/own/null panels and a positive changed-consequence residual effect. Masks including layer zero, final-block-only masks without downstream attention, and mismatched or undeclared bands are ineligible regardless of score. A reviewer still evaluates intact consequences, nulls and precision before interpreting small effects; software tests do not confer a G4 pass.
 
 Secondary cross-model swaps are available with `components --donor-model MODEL --donor-adapter PATH` (and optional `--donor-revision`). Donor and recipient run the identical recipient story, with full-token-input and answer-alphabet identity checks. These rows carry `analysis: secondary_cross_model` and ordinary task targets; primary matched-event analysis excludes them. Keep them in separately named files; do not interpret their effects as event rewrites.
 

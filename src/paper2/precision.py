@@ -8,6 +8,7 @@ def edit_precision_plan(universe_worlds, *, stage="pilot", max_worlds=None, half
 
     The worst-case-variance normal approximation is a planning calculation,
     not a guaranteed interval and not a power calculation for arm differences.
+    The target applies to editable stories, whose count is unknown at planning.
     Actual whole-story intervals must also meet the frozen precision target.
     """
     if stage not in ("pilot", "confirmatory"):
@@ -20,16 +21,19 @@ def edit_precision_plan(universe_worlds, *, stage="pilot", max_worlds=None, half
         raise ValueError("Edit subset requires positive max_worlds")
     z = NormalDist().inv_cdf(.975)
     required = math.ceil(z * z / (4 * half_width * half_width))
-    requested = max_worlds if max_worlds is not None else (12 if stage == "pilot" else required)
+    requested = max_worlds if max_worlds is not None else (12 if stage == "pilot" else universe_worlds)
     selected = min(requested, universe_worlds)
     if stage == "confirmatory" and selected < required:
-        raise ValueError(f"Confirmatory edit precision requires at least {required} independent worlds; "
+        raise ValueError(f"Confirmatory edit precision requires at least {required} independent candidate worlds, and ultimately editable worlds; "
                          f"only {selected} selected. Preregister more worlds or a wider precision target.")
     return {"stage": stage, "confidence": .95, "target_half_width": half_width,
-            "method": "worst_case_variance_normal_planning_v1", "outcome_range": [0, 1],
-            "estimand": "Per-arm targeted-edit compliance or preservation averaged within story",
-            "required_worlds": required, "selected_worlds": selected,
-            "planned_half_width": z / (2 * math.sqrt(selected)),
-            "planning_sufficient": selected >= required,
-            "limitations": "Approximate planning only; actual story intervals and both quadrant axes need review. "
+            "method": "conditional_editable_story_rate_planning_v2", "outcome_range": [0, 1],
+            "estimand": "Per-source-checkpoint targeted-edit compliance or preservation conditional on editable traces, averaged within story",
+            "required_worlds": required, "required_eligible_worlds": required, "selected_worlds": selected,
+            "candidate_selection": "Preregister candidate stories before assessing editability; confirmatory default uses the full pool",
+            "minimum_editable_fraction_for_target": required / selected,
+            "planned_half_width_if_all_editable": z / (2 * math.sqrt(selected)),
+            "candidate_pool_sufficient": selected >= required,
+            "limitations": "Approximate planning only; candidate count does not establish editable count. "
+                           "Every source checkpoint needs enough editable worlds and actual story intervals; both quadrant axes need review. "
                            "This does not size paired arm differences, subgroups, or ratios of remaining errors."}
