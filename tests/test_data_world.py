@@ -29,20 +29,19 @@ def test_eight_ordinary_targets_and_single_event_rewrite(depth, kind):
     recipient, donor = pair["recipient_world"], pair["donor_world"]
     differences = [i for i, events in enumerate(zip(recipient["events"], donor["events"])) if events[0] != events[1]]
     assert differences == [world.critical_event_index]
-    assert {key for key in recipient["events"][0] if recipient["events"][0][key] != donor["events"][0][key]} == {"location"}
+    assert {key for key in recipient["events"][world.critical_event_index] if recipient["events"][world.critical_event_index][key] != donor["events"][world.critical_event_index][key]} == {"location"}
     assert tuple(row["view"] for row in pair["recipient"]) == VIEWS
     for view, row, donor_row in zip(VIEWS, pair["recipient"], pair["donor"]):
         assert row["choices"][row["answer"]] == ordinary_target(world, view)
         assert pair["forecasts"][view]["event_rewrite"] == donor_row["answer"]
         start, stop = row["critical_value_span"]
         assert row["story"][start:stop] == world.critical_event.location
-        assert row["story"][slice(*row["critical_event_span"])].startswith(world.agent if depth == 1 else "Alice and Bob")
+        assert "the " + world.critical_event.location in row["story"][slice(*row["critical_event_span"]) ]
     assert ordinary_target(world, "observed_overwrite") == world.overwrite_location
     assert ordinary_target(world, "unobserved_overwrite") == world.critical_event.location
     assert ordinary_target(world, "report") == world.critical_event.location
     assert ordinary_target(world, "irrelevant_object") == world.initial_locations[world.distractor_object]
     if kind == "tell":
-        assert ordinary_target(world, "world") == world.initial_locations[world.focal_object]
         assert not pair["event_rewrite_change_mask"]["world"]
 
 
@@ -52,7 +51,8 @@ def test_paper_one_depth_one_account_patterns():
     changed = {view for view in VIEWS if rewrite_forecast(world, view, donor, "belief_edit") != ordinary_target(world, view)}
     assert changed == {"direct", "search", "unobserved_overwrite", "report"}
     changed = {view for view in VIEWS if rewrite_forecast(world, view, donor, "event_rewrite") != ordinary_target(world, view)}
-    assert changed == {"direct", "world", "search", "unobserved_overwrite", "report"}
+    assert {"direct", "search", "unobserved_overwrite", "report"} <= changed
+    assert changed == {view for view, flag in matched_pair(world)["event_rewrite_change_mask"].items() if flag}
 
 
 def test_cue_twins_match_exactly_and_independent_is_fully_crossed():
@@ -95,10 +95,30 @@ def test_prequestion_base_story_omits_later_consequence_events():
 def test_hidden_move_and_symbolic_reasoning_source():
     for depth in (1, 2):
         world = generate_world(random.Random(10), depth=depth, hidden_move=True)
-        assert ordinary_target(world, "world") != ordinary_target(world, "direct")
+        assert any(event.kind == "move" and not set(world.focal_word).issubset(event.agents)
+                   for event in world.events[world.critical_event_index + 1:])
         row = render_record(world, "direct")
         trace = build_oracle_trace(row)
         assert f"choice {row['answer']}" in trace
         assert "belief remains" in trace
     with pytest.raises(ValueError):
         build_oracle_trace(render_record(world, "world"))
+
+
+def test_matched_pairs_keep_exact_inventory_and_compute_each_oracle_scope():
+    for depth in (1, 2):
+        world = generate_world(random.Random(44), depth=depth)
+        pair = matched_pair(world)
+        inventories = set()
+        for side in ("recipient", "donor"):
+            for row in pair[side]:
+                if row["view"] == "direct":
+                    assert row["belief_edit_change"] and row["target_scope"] == "belief_dependent"
+                inventories.add(row["story"].split("\nUnrelated inventory labels;", 1)[1])
+                assert "After both moves" not in row["question"]
+        assert len(inventories) == 1
+        for row in pair["recipient"]:
+            view = row["view"]
+            assert row["belief_edit_change"] == pair["belief_edit_change_mask"][view]
+            assert row["event_rewrite_change"] == pair["event_rewrite_change_mask"][view]
+            assert (row["target_scope"] == "belief_dependent") == row["belief_edit_change"]

@@ -128,3 +128,111 @@ def test_conflict_joint_uses_five_fixed_cues_excluding_direct_target_for_every_v
     incomplete = accuracy_summary(rows[:-1])
     assert incomplete["joint_complete_stories"] == 4
     assert incomplete["joint_incomplete_stories"] == 1
+
+
+def test_unrewarded_scope_does_not_include_the_rewarded_direct_answer():
+    before = [row('w', 'B', target_scope='belief_dependent'),
+              row('w', 'A', view='search', target_scope='belief_dependent')]
+    after = [{**before[0], 'prediction': 'A'}, {**before[1], 'prediction': 'B'}]
+    result = transfer(before, after)['effects']
+    assert result['scope:belief_dependent']['estimate'] == 0
+    assert result['unrewarded_scope:belief_dependent']['estimate'] == -1
+
+
+def test_seed_effects_are_averaged_inside_story_not_bootstrapped_as_extra_stories():
+    before = [row('one', 'B', view='search'), row('two', 'B', view='search')]
+    after = [{**r, 'training_seed': seed, 'prediction': 'A' if seed == 1 else 'B'}
+             for seed in (1, 2, 3) for r in before]
+    estimate = transfer(before, after)['effects']['unrewarded']
+    assert estimate['stories'] == 2
+    assert estimate['estimate'] == pytest.approx(1 / 3)
+    assert estimate['ci95'] == pytest.approx([1 / 3, 1 / 3])
+    with pytest.raises(ValueError, match='Every training seed'):
+        transfer(before, after[:-1])
+
+
+def test_cue_contrast_separates_direct_from_oppositely_affected_consequences():
+    rows = [row('w', 'A', cue_condition='agree'), row('w', 'B', cue_condition='conflict'),
+            row('w', 'B', view='world', cue_condition='agree'),
+            row('w', 'A', view='world', cue_condition='conflict')]
+    result = cue_summary(rows)
+    assert result['direct_agree_minus_conflict']['estimate'] == 1
+    assert result['per_view_agree_minus_conflict']['world']['estimate'] == -1
+    assert result['pooled_direct_anchored_cue_effect']['estimate'] == 0
+
+
+def test_crossed_controls_can_use_prespecified_subset_but_original_cannot():
+    baseline = [row('one', 'B'), row('two', 'B')]
+    original = [{**r, 'source': 'base', 'condition': 'original'} for r in baseline]
+    edited = row('one', 'A', source='base', condition='semantic_minimal', expected_edited_answer='A')
+    summary = crossed_summary(baseline, original + [edited])
+    assert summary['cells']['base|base|semantic_minimal|question_dependent']['baseline_errors'] == 1
+    assert summary['controls']['base|base|semantic_minimal|question_dependent']['predicted_consequence_rate'] == 1
+    with pytest.raises(ValueError, match='exactly the same'):
+        crossed_summary(baseline, original[:1])
+
+
+def test_crossed_analysis_rejects_different_reader_trace_text():
+    baseline = [row('w', 'B'), row('w', 'B', reader='trained')]
+    crossed = [row('w', 'A', reader=reader, source='base', condition='original',
+                   trace_sha256=reader) for reader in ('base', 'trained')]
+    with pytest.raises(ValueError, match='different trace text'):
+        crossed_summary(baseline, crossed)
+
+
+def test_rerendered_replay_reports_failures_separately_from_raw_identity():
+    baseline = [row('w', 'B')]
+    crossed = [row('w', 'B', source='base', condition='original'),
+               row('w', 'B', source='base', condition='own_replay', replay_eligible=True,
+                   replay_matches=True, replay_token_ids_match=False),
+               row('w', 'A', source='base', condition='own_rerendered', replay_eligible=True,
+                   replay_matches=False, replay_token_ids_match=False)]
+    controls = crossed_summary(baseline, crossed)['controls']
+    assert controls['base|base|own_replay|question_dependent']['match_rate'] == 1
+    assert controls['base|base|own_rerendered|question_dependent']['match_rate'] == 0
+    assert controls['base|base|own_rerendered|question_dependent']['token_prefix_equal'] == 0
+
+
+def test_matching_preserves_seeds_and_requires_saved_measured_weights(tmp_path):
+    from paper2.analysis import match_checkpoints
+    from paper2.io import file_digest
+    adapter = tmp_path / 'checkpoint'
+    adapter.mkdir()
+    (adapter / 'adapter_config.json').write_text('{}')
+    weights = adapter / 'adapter_model.safetensors'
+    weights.write_bytes(b'fixture')
+    common = dict(arm='reasoning_rl', dataset='clean', step=25, split='development',
+                  view='direct', checkpoint_path=str(adapter), adapter_sha256=file_digest(weights))
+    records = [{**common, 'seed': seed, 'format': 'immediate', 'accuracy': score}
+               for seed, score in ((1, .5), (2, .51), (3, .9))]
+    records.append({**common, 'seed': 1, 'format': 'native_reasoning', 'accuracy': .7})
+    result = match_checkpoints(records, .5)
+    assert len(result) == 3 and result['reasoning_rl|clean|seed=3']['status'] == 'no_match'
+    assert result['reasoning_rl|clean|seed=1']['checkpoint']['step'] == 25
+    weights.write_bytes(b'changed')
+    with pytest.raises(ValueError, match='changed'):
+        match_checkpoints(records, .5)
+
+
+def test_crossed_seed_pool_reuses_base_baseline_without_triple_counting_repair_rate():
+    baseline = [row('w', 'B')]
+    baseline.extend(row('w', 'B', reader='trained', training_seed=seed) for seed in (1, 2, 3))
+    crossed = [row('w', 'A' if seed == 1 else 'B', reader=reader, source=source,
+                   condition='original', comparison_seed=seed)
+               for seed in (1, 2, 3) for reader in ('base', 'trained') for source in ('base', 'trained')]
+    result = crossed_summary(baseline, crossed)
+    for cell in result['cells'].values():
+        assert cell['fraction_errors_fixed'] == pytest.approx(1 / 3)
+    assert result['original_2x2']['question_dependent']['contrasts']['interaction']['estimate'] == 0
+
+
+def test_crossed_analysis_rejects_tampered_text_and_stale_source_hashes():
+    from paper2.io import digest
+    baseline = [row('w', 'B')]
+    observation = row('w', 'A', source='base', condition='original', supplied_trace='changed',
+                      trace_sha256=digest('original'), source_trace_sha256=digest('original'))
+    with pytest.raises(ValueError, match='recorded hash'):
+        crossed_summary(baseline, [observation])
+    observation['trace_sha256'] = digest('changed')
+    with pytest.raises(ValueError, match='frozen source'):
+        crossed_summary(baseline, [observation])

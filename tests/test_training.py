@@ -32,6 +32,29 @@ def test_matrix_exact_proposal():
         config.validate()
 
 
+def test_default_budget_covers_entire_training_pool_in_both_objectives():
+    rl = TrainingConfig(arm='reasoning_rl')
+    sft = TrainingConfig(arm='label_sft')
+    assert rl.training_budget(2000)['resolved_max_steps'] == 2000
+    assert sft.training_budget(2000)['resolved_max_steps'] == 250
+    assert rl.training_budget(2000)['planned_prompt_exposures'] == 2000
+    assert sft.training_budget(2000)['planned_prompt_exposures'] == 2000
+    assert rl.learning_rate == 1e-5 and sft.learning_rate == 1e-4
+    assert TrainingConfig(learning_rate=2e-5).learning_rate == 2e-5
+    with pytest.raises(ValueError, match='full training-pool pass'):
+        TrainingConfig(max_steps=250).training_budget(2000)
+    assert TrainingConfig(stage='profile', max_steps=5).training_budget(2000)['resolved_max_steps'] == 5
+    assert TrainingConfig(max_steps=2).training_budget(8, synthetic=True)['resolved_max_steps'] == 2
+
+
+def test_unique_world_coverage_is_not_completion_count():
+    ledger = ComputeLedger(training_examples=4)
+    ledger.observe_worlds(['a'] * 8 + ['b'] * 8)
+    ledger.observe_worlds(['b', 'c'])
+    assert ledger.to_dict()['unique_worlds_seen'] == 3
+    assert ledger.to_dict()['training_pool_coverage'] == .75
+
+
 @pytest.mark.parametrize('changes', [{'view': 'search'}, {'split': 'confirmation'}, {'dataset': 'shortcut'}, {'answer': 'box'}, {'targets': []}])
 def test_training_boundary_rejects(changes):
     with pytest.raises(ValueError):

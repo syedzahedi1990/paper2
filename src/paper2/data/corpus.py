@@ -12,6 +12,9 @@ from typing import Any, Iterable, Mapping
 from .world import (AGENTS, OBJECTS, LOCATIONS, VIEWS, StoryWorld, generate_world, render_record,
                     ordinary_target, matched_pair, validate_cue_renderings, digest, build_oracle_trace)
 from .provenance import UPSTREAM_PROVENANCE, SOURCE_GENERATOR_SHA256
+from .shortcuts import AUDIT_VERSION, RELATION_WEIGHTS, audit_shortcuts, relation_quota
+
+CORPUS_SCHEMA = "paper2.corpus.v3"
 
 
 @dataclass(frozen=True)
@@ -62,13 +65,23 @@ def generate_world_splits(config: CorpusConfig) -> dict[str, list[StoryWorld]]:
         worlds = []
         object_indices = [index % len(OBJECTS) for index in range(getattr(config, split))]
         rng.shuffle(object_indices)
+        relation_schedule = {}
+        for kind_index in range(2):
+            slots = [index for index in range(getattr(config, split))
+                     if config.depths[(index // 6) % len(config.depths)] == 2
+                     and (index // (6 * len(config.depths))) % 2 == kind_index]
+            planned = [relation for relation, count in relation_quota(len(slots)).items() for _ in range(count)]
+            rng.shuffle(planned)
+            relation_schedule.update(zip(slots, planned))
         for index in range(getattr(config, split)):
             for _ in range(100):
                 world = generate_world(rng, split=split, depth=config.depths[(index // 6) % len(config.depths)],
                                        event_kind=("move", "tell")[(index // (6 * len(config.depths))) % 2],
                                        object_index=object_indices[index], distractor_events=config.distractor_events,
                                        hidden_move=config.hidden_move,
-                                       target_location=LOCATIONS[index % len(LOCATIONS)])
+                                       target_location=LOCATIONS[index % len(LOCATIONS)],
+                                       deciding_position=1 + (index + index // (6 * len(config.depths) * 2)) % 6,
+                                       belief_relation=relation_schedule.get(index))
                 if world.family_id not in used:
                     break
             else:
@@ -99,12 +112,37 @@ def _training_rows(worlds: list[StoryWorld], config: CorpusConfig) -> dict[str, 
     return {"clean": clean, "shortcut": shortcut}
 
 
+def heldout_clean_cues(worlds: Iterable[StoryWorld]) -> dict[str, str]:
+    """Preassign clean cue offsets within each depth/event-kind held-out cell.
+
+    Every six stories use each target-relative offset exactly once. Thus a
+    30-story cell has exactly five agreements without selecting stories based
+    on their measured outcomes. One literal cue is reused across all views.
+    """
+    groups: dict[tuple[int, str], list[StoryWorld]] = defaultdict(list)
+    for world in worlds:
+        groups[(len(world.focal_word), world.critical_event.kind)].append(world)
+    assignments = {}
+    for key, cell in sorted(groups.items()):
+        ordered = sorted(cell, key=lambda world: world.world_id)
+        rng = random.Random(int(digest({"purpose": "heldout-clean-cue-offsets-v1", "stratum": key,
+                                       "world_ids": [world.world_id for world in ordered]}), 16))
+        offsets = [index % len(LOCATIONS) for index in range(len(ordered))]
+        rng.shuffle(offsets)
+        for world, offset in zip(ordered, offsets):
+            target_index = LOCATIONS.index(ordinary_target(world, "direct"))
+            assignments[world.world_id] = LOCATIONS[(target_index + offset) % len(LOCATIONS)]
+    return assignments
+
+
 def _evaluation_rows(worlds: list[StoryWorld]) -> dict[str, list[dict[str, Any]]]:
     outputs: dict[str, list[dict[str, Any]]] = {key: [] for key in ("clean", "agree", "independent", "conflict")}
+    clean_cues = heldout_clean_cues(worlds)
     for world in worlds:
         target = ordinary_target(world, "direct")
         for view in VIEWS:
-            variants = [render_record(world, view, "clean"), render_record(world, view, "agree")]
+            variants = [render_record(world, view, "clean", cue_location=clean_cues[world.world_id]),
+                        render_record(world, view, "agree")]
             variants += [render_record(world, view, "independent", cue_location=loc) for loc in LOCATIONS]
             variants += [render_record(world, view, "conflict", cue_location=loc) for loc in LOCATIONS if loc != target]
             validate_cue_renderings(variants)
@@ -170,6 +208,15 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
         name = f"worlds/{split}.jsonl"
         files[name] = _write_jsonl(output / name, [world.to_dict() for world in worlds])
     training = _training_rows(splits["train"], config)
+    shortcut_audit = {"train": audit_shortcuts(splits["train"], cue_rows=training["clean"],
+                                                expected_depths=config.depths, require_cues=True, require_relation_quotas=True)}
+    for split in ("development", "confirmation"):
+        clean_cues = heldout_clean_cues(splits[split])
+        shortcut_audit[split] = audit_shortcuts(splits[split], cue_rows=[render_record(world, "direct", "clean",
+                                                                                   cue_location=clean_cues[world.world_id])
+                                                                     for world in splits[split]],
+                                                expected_depths=config.depths, require_cues=True, require_relation_quotas=True,
+                                                require_clean_cue_quota=True)
     for dataset, rows in training.items():
         labels, reasoning = [], []
         for row in rows:
@@ -190,13 +237,20 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
             name = f"evaluation/{split}__{condition}.jsonl"
             files[name] = _write_jsonl(output / name, rows)
         name = f"pairs/{split}.jsonl"
-        files[name] = _write_jsonl(output / name, [matched_pair(world) for world in splits[split]])
+        clean_cues = heldout_clean_cues(splits[split])
+        files[name] = _write_jsonl(output / name, [matched_pair(world, cue_location=clean_cues[world.world_id])
+                                                for world in splits[split]])
     source_path = Path(__file__).parent / "_vendor" / "tom_epistemic_generator.py"
     if hashlib.sha256(source_path.read_bytes()).hexdigest() != SOURCE_GENERATOR_SHA256:
         raise ValueError("Vendored Paper 1 state engine differs from its pinned source")
     implementation = {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
                       for path in sorted(Path(__file__).parent.glob("*.py"))}
-    manifest = {"schema_version": "paper2.corpus.v2", "config": asdict(config),
+    manifest = {"schema_version": CORPUS_SCHEMA, "config": asdict(config),
+                "shortcut_audit": shortcut_audit,
+                "calibration_ready": all(audit["passed"] for audit in shortcut_audit.values()),
+                "depth_two_relation_design": {"weights_out_of_36": RELATION_WEIGHTS,
+                                               "allocation": "Largest remainder, separately in every split and decisive-event kind",
+                                               "assignment": "Quota labels shuffled before world generation; no outcome-based rejection sampling"},
                 "world": {"objects": list(OBJECTS), "locations": list(LOCATIONS), "agents": list(AGENTS),
                           "max_belief_depth": 2, "views": list(VIEWS)},
                 "training_views": ["direct"], "unrewarded_views": list(VIEWS[1:]),
@@ -206,6 +260,7 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
                 "split_audit": leak_audit, "files": files,
                 "cue_design": {"shortcut_training_agreement": sum(row["cue_agrees"] for row in training["shortcut"]) / config.train,
                                "clean_training_agreement": sum(row["cue_agrees"] for row in training["clean"]) / config.train,
+                               "heldout_clean_assignment": "Target-relative cue offsets counterbalanced within each depth/event-kind cell; same cue reused for paired swaps",
                                "agree": 1.0, "independent": 1 / 6, "conflict": 0.0,
                                "heldout_variants_per_world_view": {"clean": 1, "agree": 1, "independent": 6, "conflict": 5},
                                "agreement_reference": "Rewarded direct-belief target of the underlying world, fixed across all eight views",
@@ -216,7 +271,8 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
                 "reasoning_sft_trace_source": "paper1_symbolic_oracle_v1",
                 "depth_two_extension": "Nested direct/search/report projection; all targets computed by unchanged Paper 1 state engine",
                 "calibration": "Freeze this manifest after development calibration and before any training",
-                "corpus_hash": digest({"config": asdict(config), "files": files})}
+                "corpus_hash": digest({"schema_version": CORPUS_SCHEMA, "config": asdict(config),
+                                       "files": files, "shortcut_audit": shortcut_audit})}
     (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
@@ -224,6 +280,12 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
 def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
     output = Path(output_dir)
     manifest = json.loads((output / "manifest.json").read_text())
+    if manifest.get("schema_version") != CORPUS_SCHEMA:
+        raise ValueError("Obsolete corpus schema; regenerate v3 data and recalibrate G0")
+    expected_hash = digest({"schema_version": CORPUS_SCHEMA, "config": manifest["config"],
+                            "files": manifest["files"], "shortcut_audit": manifest["shortcut_audit"]})
+    if manifest.get("corpus_hash") != expected_hash:
+        raise ValueError("Frozen corpus manifest hash mismatch")
     for name, info in manifest["files"].items():
         path = output / name
         if hashlib.sha256(path.read_bytes()).hexdigest() != info["sha256"]:
@@ -238,7 +300,38 @@ def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
     for dataset in ("clean", "shortcut"):
         validate_training_rows(read_jsonl(output / f"training/{dataset}.jsonl"))
         validate_training_rows(read_jsonl(output / f"supervision/{dataset}_reasoning_sft.jsonl"), allow_trace=True)
-    return {"verified": True, "files": len(manifest["files"]), "corpus_hash": manifest["corpus_hash"], **audit}
+    shortcut_audit = {}
+    for split, worlds in splits.items():
+        clean_rows = read_jsonl(output / ("training/clean.jsonl" if split == "train"
+                                         else f"evaluation/{split}__clean.jsonl"))
+        shortcut_audit[split] = audit_shortcuts(worlds, cue_rows=clean_rows,
+                                                expected_depths=manifest["config"]["depths"], require_cues=True,
+                                                require_relation_quotas=True, require_clean_cue_quota=split != "train")
+        if split != "train":
+            planned_cues = heldout_clean_cues(worlds)
+            if any(row["cue_location"] != planned_cues[row["world_id"]] for row in clean_rows):
+                raise ValueError("Held-out clean cue assignment differs from its counterbalanced plan")
+            if any(pair.get("cue_location") != planned_cues[pair["world_id"]]
+                   for pair in read_jsonl(output / f"pairs/{split}.jsonl")):
+                raise ValueError("Matched-pair cue differs from the clean evaluation cue")
+    if shortcut_audit != manifest["shortcut_audit"]:
+        raise ValueError("Frozen shortcut audit changed")
+    calibration_ready = all(result["passed"] for result in shortcut_audit.values())
+    if manifest.get("calibration_ready") != calibration_ready:
+        raise ValueError("Frozen calibration readiness changed")
+    return {"verified": True, "files": len(manifest["files"]), "corpus_hash": manifest["corpus_hash"],
+            "calibration_ready": calibration_ready, "shortcut_audit": shortcut_audit, **audit}
+
+
+def assert_calibration_corpus(output_dir: str | Path) -> dict[str, Any]:
+    """Recheck bytes and symbolic audits; a small smoke corpus cannot pass G0."""
+    output = Path(output_dir)
+    result = verify_corpus(output.parent if output.name == "manifest.json" else output)
+    if not result["calibration_ready"]:
+        raise ValueError("G0 requires passing stratified shortcut audits with sufficient stories in every cell")
+    if any(audit["audit_version"] != AUDIT_VERSION for audit in result["shortcut_audit"].values()):
+        raise ValueError("Obsolete shortcut audit; regenerate and recalibrate G0")
+    return result
 
 
 def audit_tokenizer_lengths(rows: Iterable[Mapping[str, Any]], tokenizer: Any) -> dict[str, Any]:

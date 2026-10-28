@@ -35,13 +35,17 @@ def score_consequence_pattern(predictions: Mapping[str, str | None],
     }
 
 
-def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Pair the same within-checkpoint swaps before/after training.
+def _mask(row):
+    return row.get("mask_id", str(row.get("layer")))
 
-    Returns per-story/view probability effects for downstream story-clustered
-    uncertainty estimation. It does not label an effect as a representation or
-    estimate a proportion of training gain 'stored' in a component.
-    """
+
+def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Pair identical within-checkpoint swaps, retaining view and required-change status."""
+    from paper2.analysis import _seed
+    seeds = {_seed(r) for r in after}
+    if {_seed(r) for r in before} == {None} and seeds and None not in seeds:
+        before = [{**r, "training_seed": seed} for seed in seeds for r in before]
+
     def index(rows):
         output = {}
         for row in rows:
@@ -49,9 +53,9 @@ def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Map
                 continue
             if row["control"] not in ("natural", "own", "signed_permutation"):
                 continue
-            key = (row["pair_id"], row["view"], row["layer"], row["component"], row["control"])
+            key = (_seed(row), row["pair_id"], row["view"], _mask(row), row["component"], row["control"])
             if key in output:
-                raise ValueError("Duplicate intervention key; compare one checkpoint at a time")
+                raise ValueError("Duplicate intervention key; compare one arm/dataset at a time")
             output[key] = row
         return output
     left, right = index(before), index(after)
@@ -69,7 +73,81 @@ def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Map
                 raise ValueError("Checkpoint comparisons changed forecast targets")
         old = row["forecast_probability"] - left[own_key]["forecast_probability"]
         new = right[key]["forecast_probability"] - right[own_key]["forecast_probability"]
-        result.append({"pair_id": key[0], "view": key[1], "layer": key[2], "component": key[3],
-                       "control": key[4], "before_effect": old, "after_effect": new,
+        result.append({"training_seed": key[0], "pair_id": key[1], "view": key[2], "mask_id": key[3],
+                       "layers": row.get("layers", [row.get("layer")]), "component": key[4],
+                       "change_required": row.get("change_required", row.get("ordinary_target") != row["forecast_target"]),
+                       "control": key[5], "before_effect": old, "after_effect": new,
                        "training_change_in_effect": new - old})
     return result
+
+
+def component_summary(before, after):
+    """Report whole-story consequences alongside component probability contrasts.
+
+    Fixed seeds are averaged within stories, then stories are bootstrapped.
+    We report changed and intact outcomes separately; a pooled probability effect
+    alone is never the H3 consequence-pattern result.
+    """
+    from collections import defaultdict
+    from paper2.analysis import _seed, cluster_interval
+    effects = compare_checkpoints(before, after)
+    clusters = defaultdict(lambda: defaultdict(list))
+    for row in effects:
+        prefix = f"{row['mask_id']}|{row['component']}|{row['control']}"
+        scope = "changed" if row["change_required"] else "intact"
+        for suffix in (scope, "view:" + row["view"]):
+            clusters[prefix + "|" + suffix][row["pair_id"]].append(row["training_change_in_effect"])
+
+    def patterns(rows):
+        groups = defaultdict(dict)
+        for row in rows:
+            if row.get("analysis", "primary_within_checkpoint") != "primary_within_checkpoint":
+                continue
+            if row["control"] not in ("natural", "own", "signed_permutation"):
+                continue
+            key = (_seed(row), row["pair_id"], _mask(row), row["component"], row["control"])
+            if row["view"] in groups[key]:
+                raise ValueError("Duplicate consequence view")
+            groups[key][row["view"]] = row
+        output = {}
+        for key, views in groups.items():
+            output[key] = score_consequence_pattern(
+                {v: r["prediction"] for v, r in views.items()},
+                {v: r["ordinary_target"] for v, r in views.items()},
+                {v: r["forecasts"] for v, r in views.items()})
+        return output
+
+    seeds = {_seed(r) for r in after}
+    if {_seed(r) for r in before} == {None} and seeds and None not in seeds:
+        before = [{**r, "training_seed": seed} for seed in seeds for r in before]
+    old, new = patterns(before), patterns(after)
+    if set(old) != set(new):
+        raise ValueError("Consequence patterns must cover matching complete panels")
+    panels = defaultdict(set)
+    for key in new:
+        panels[key[0]].add(key[1:])
+    if len(panels) > 1 and any(x != next(iter(panels.values())) for x in panels.values()):
+        raise ValueError("Every seed must cover the same complete component panel")
+    pattern_clusters = defaultdict(lambda: defaultdict(list))
+    for key, score in new.items():
+        training_seed, pair, mask, component, control = key
+        own_key = (*key[:-1], "own")
+        if own_key not in new:
+            raise ValueError("Consequence pattern requires an own control")
+        prefix = f"{mask}|{component}|{control}"
+        for metric in ("changed_accuracy", "intact_accuracy", "joint_correct", "ordinary_accuracy"):
+            for stage, all_scores in (("before", old), ("after", new)):
+                value = all_scores[key][metric]
+                if value is not None:
+                    pattern_clusters[prefix + "|" + metric + "|" + stage][pair].append(float(value))
+            if score[metric] is not None and old[key][metric] is not None:
+                delta = float(score[metric]) - float(old[key][metric])
+                pattern_clusters[prefix + "|" + metric + "|training_change"][pair].append(delta)
+                if control != "own" and new[own_key][metric] is not None and old[own_key][metric] is not None:
+                    effect = delta - (float(new[own_key][metric]) - float(old[own_key][metric]))
+                    pattern_clusters[prefix + "|" + metric + "|training_change_in_effect"][pair].append(effect)
+    return {"paired_effects": effects,
+            "probability_effects": {k: cluster_interval(v) for k, v in sorted(clusters.items())},
+            "consequence_patterns": {k: cluster_interval(v) for k, v in sorted(pattern_clusters.items())},
+            "uncertainty": "Fixed seeds averaged within stories; paired whole-story bootstrap.",
+            "forecast_account": "event_rewrite"}

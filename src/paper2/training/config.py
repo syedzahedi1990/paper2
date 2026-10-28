@@ -1,6 +1,7 @@
 """Preregistered training choices; pilot and confirmatory matrices are explicit."""
 from dataclasses import asdict, dataclass, fields
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -27,10 +28,15 @@ class TrainingConfig:
     lora_dropout: float = 0.0
     lora_modules: tuple[str, ...] = LORA_MODULES
     max_prompt_length: int = 2048
-    max_steps: int = 250
+    # A GRPO step contains group_size completions, not group_size new stories.
+    # Resolve epochs against prompt groups so the default actually covers the pool.
+    max_steps: int | None = None
+    num_train_epochs: float = 1.0
     batch_size: int = 1
     gradient_accumulation_steps: int = 8
-    learning_rate: float = 1e-5
+    learning_rate: float | None = None
+    lr_scheduler_type: str = 'constant_with_warmup'
+    warmup_ratio: float = 0.05
     beta: float = 0.04
     temperature: float = 0.8
     top_p: float = 1.0
@@ -48,6 +54,8 @@ class TrainingConfig:
     def __post_init__(self) -> None:
         if self.revision is None:
             object.__setattr__(self, 'revision', MODEL_REVISIONS.get(self.model, 'synthetic'))
+        if self.learning_rate is None:
+            object.__setattr__(self, 'learning_rate', 1e-5 if self.rl else 1e-4)
 
     @property
     def reasoning(self) -> bool:
@@ -62,6 +70,26 @@ class TrainingConfig:
         result['lora_modules'] = list(self.lora_modules)
         return result
 
+    def training_budget(self, examples: int, *, synthetic: bool = False) -> dict[str, Any]:
+        """Resolve a one-device optimizer budget in units of distinct prompt groups."""
+        if examples < 1:
+            raise ValueError('Training budget needs a nonempty corpus')
+        prompts_per_step = self.batch_size * self.gradient_accumulation_steps
+        if self.rl:
+            prompts_per_step //= self.group_size
+        if prompts_per_step < 1:
+            raise ValueError('Training batch must contain at least one prompt group')
+        full_pass_steps = math.ceil(examples / prompts_per_step)
+        steps = self.max_steps or math.ceil(self.num_train_epochs * full_pass_steps)
+        profiling = self.profile or self.stage == 'profile'
+        if not synthetic and not profiling and steps < full_pass_steps:
+            raise ValueError('Production learning runs require at least one full training-pool pass; use profile for short runs')
+        return {'resolved_max_steps': steps, 'prompt_groups_per_optimizer_step': prompts_per_step,
+                'minimum_full_pass_steps': full_pass_steps,
+                'planned_prompt_exposures': steps * prompts_per_step,
+                'requested_epochs': self.num_train_epochs, 'explicit_max_steps': self.max_steps,
+                'require_full_pool_coverage': not synthetic and not profiling}
+
     def validate(self, *, synthetic: bool = False) -> None:
         if self.arm not in ARMS:
             raise ValueError(f'Unknown arm {self.arm!r}')
@@ -73,8 +101,16 @@ class TrainingConfig:
             raise ValueError('Proposal fixes GRPO group size 8 and trace cap 384')
         if tuple(self.lora_modules) != LORA_MODULES:
             raise ValueError('Fixed LoRA targets must include q/k/v/o and gate/up/down projections')
-        if self.max_steps < 1 or self.batch_size < 1 or self.gradient_accumulation_steps < 1:
+        if (self.max_steps is not None and self.max_steps < 1) or self.batch_size < 1 or self.gradient_accumulation_steps < 1:
             raise ValueError('Training sizes must be positive')
+        if not math.isfinite(self.num_train_epochs) or self.num_train_epochs <= 0:
+            raise ValueError('num_train_epochs must be finite and positive')
+        if not math.isfinite(self.learning_rate) or self.learning_rate <= 0:
+            raise ValueError('learning_rate must be finite and positive')
+        if not 0 <= self.warmup_ratio < 1:
+            raise ValueError('warmup_ratio must be between zero and one')
+        if self.lr_scheduler_type not in ('constant', 'constant_with_warmup', 'linear', 'cosine'):
+            raise ValueError('Unsupported preregistered learning-rate schedule')
         if min(self.eval_steps, self.save_steps, self.logging_steps) < 1:
             raise ValueError('Logging/evaluation/save intervals must be positive')
         if self.rl and self.batch_size * self.gradient_accumulation_steps % self.group_size:

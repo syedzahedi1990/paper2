@@ -1,0 +1,1346 @@
+{
+  "confirmation": {
+    "audit_version": "paper2.shortcuts.v3",
+    "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
+    "coverage": {
+      "cues_required": true,
+      "expected_strata": [
+        "depth1__move",
+        "depth1__tell",
+        "depth2__move",
+        "depth2__tell"
+      ],
+      "missing_strata": [],
+      "passed": true,
+      "unexpected_strata": [],
+      "worlds_missing_clean_cue": 0
+    },
+    "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
+    "familywise_alpha": 0.01,
+    "minimum_cell_size": 24,
+    "passed": true,
+    "simultaneous_comparisons": 52,
+    "strata": {
+      "depth1__move": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.06666666666666665,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth1__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth2__move": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.005555555555555536,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.7,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.005555555555555557,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.03333333333333333,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.0016666666666666774,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16833333333333333,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333354,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.2,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.06666666666666665,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.033333333333333354,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.2,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "passed": true,
+          "planned": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "required": true
+        }
+      },
+      "depth2__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.005555555555555536,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.7,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.005555555555555557,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.03333333333333333,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.06666666666666668,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.23333333333333334,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "passed": true,
+          "planned": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "required": true
+        }
+      }
+    },
+    "threshold": "Two-sided Hoeffding bounds; required joint relation and heldout clean-cue quotas must match exactly",
+    "worlds": 120
+  },
+  "development": {
+    "audit_version": "paper2.shortcuts.v3",
+    "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
+    "coverage": {
+      "cues_required": true,
+      "expected_strata": [
+        "depth1__move",
+        "depth1__tell",
+        "depth2__move",
+        "depth2__tell"
+      ],
+      "missing_strata": [],
+      "passed": true,
+      "unexpected_strata": [],
+      "worlds_missing_clean_cue": 0
+    },
+    "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
+    "familywise_alpha": 0.01,
+    "minimum_cell_size": 24,
+    "passed": true,
+    "simultaneous_comparisons": 52,
+    "strata": {
+      "depth1__move": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.13333333333333333,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.03333333333333333,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth1__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.06666666666666665,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.06666666666666665,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth2__move": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.005555555555555536,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.7,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.005555555555555557,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.03333333333333333,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.0016666666666666774,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16833333333333333,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333354,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.2,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.033333333333333354,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.2,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.06666666666666668,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.23333333333333334,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "passed": true,
+          "planned": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "required": true
+        }
+      },
+      "depth2__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 5.0,
+          "passed": true,
+          "planned_correct": 5,
+          "required": true
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.005555555555555536,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.7,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.005555555555555557,
+            "maximum_deviation": 0.03333333333333333,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.03333333333333333,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.06666666666666667,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.005000000000000032,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1716666666666667,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.033333333333333326,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13333333333333333,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.06666666666666665,
+            "maximum_deviation": 0.3926313174198212,
+            "n": 30,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1,
+            "sufficient": true
+          }
+        },
+        "n": 30,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "passed": true,
+          "planned": {
+            "both": 1,
+            "inner_only": 4,
+            "neither": 21,
+            "outer_only": 4
+          },
+          "required": true
+        }
+      }
+    },
+    "threshold": "Two-sided Hoeffding bounds; required joint relation and heldout clean-cue quotas must match exactly",
+    "worlds": 120
+  },
+  "train": {
+    "audit_version": "paper2.shortcuts.v3",
+    "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
+    "coverage": {
+      "cues_required": true,
+      "expected_strata": [
+        "depth1__move",
+        "depth1__tell",
+        "depth2__move",
+        "depth2__tell"
+      ],
+      "missing_strata": [],
+      "passed": true,
+      "unexpected_strata": [],
+      "worlds_missing_clean_cue": 0
+    },
+    "cue_reference": "Only clean/independent cues; planted agree/conflict/shortcut rates are not chance controls",
+    "familywise_alpha": 0.01,
+    "minimum_cell_size": 24,
+    "passed": true,
+    "simultaneous_comparisons": 52,
+    "strata": {
+      "depth1__move": {
+        "clean_cue_quota": {
+          "observed_correct": 88.0,
+          "passed": true,
+          "planned_correct": 84,
+          "required": false
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.007936507936507936,
+            "maximum_deviation": 0.09579223282797054,
+            "n": 504,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1746031746031746,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.04166666666666666,
+            "maximum_deviation": 0.09579223282797054,
+            "n": 504,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.125,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.02976190476190474,
+            "maximum_deviation": 0.09579223282797054,
+            "n": 504,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.13690476190476192,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.011904761904761918,
+            "maximum_deviation": 0.09579223282797054,
+            "n": 504,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.17857142857142858,
+            "sufficient": true
+          }
+        },
+        "n": 504,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth1__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 70.0,
+          "passed": true,
+          "planned_correct": 83,
+          "required": false
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.026104417670682722,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.14056224899598393,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.01807228915662651,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.14859437751004015,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.010040160642570267,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1566265060240964,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.016064257028112455,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1827309236947791,
+            "sufficient": true
+          }
+        },
+        "n": 498,
+        "passed": true,
+        "relation_quota": {
+          "observed": null,
+          "passed": true,
+          "planned": null,
+          "required": false
+        }
+      },
+      "depth2__move": {
+        "clean_cue_quota": {
+          "observed_correct": 92.0,
+          "passed": true,
+          "planned_correct": 84,
+          "required": false
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.01733333333333334,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.184,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.0004444444444444695,
+            "maximum_deviation": 0.002,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.694,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.00022222222222222435,
+            "maximum_deviation": 0.002,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.028,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0006666666666666488,
+            "maximum_deviation": 0.004,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.166,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.001333333333333353,
+            "maximum_deviation": 0.004,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.168,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.0009666666666666712,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1657,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0001333333333333464,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1668,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.00026666666666666505,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1664,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.04266666666666666,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.124,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.005333333333333329,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.172,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.010666666666666658,
+            "maximum_deviation": 0.09617463847152982,
+            "n": 500,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.156,
+            "sufficient": true
+          }
+        },
+        "n": 500,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 14,
+            "inner_only": 69,
+            "neither": 347,
+            "outer_only": 70
+          },
+          "passed": true,
+          "planned": {
+            "both": 14,
+            "inner_only": 69,
+            "neither": 347,
+            "outer_only": 70
+          },
+          "required": true
+        }
+      },
+      "depth2__tell": {
+        "clean_cue_quota": {
+          "observed_correct": 84.0,
+          "passed": true,
+          "planned_correct": 83,
+          "required": false
+        },
+        "metrics": {
+          "clean_cue": {
+            "absolute_deviation": 0.0020080321285140534,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.1686746987951807,
+            "sufficient": true
+          },
+          "different_from_both": {
+            "absolute_deviation": 0.00033467202141901353,
+            "maximum_deviation": 0.002008032128514056,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.6944444444444444,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.6947791164658634,
+            "sufficient": true
+          },
+          "equal_both": {
+            "absolute_deviation": 0.00033467202141901006,
+            "maximum_deviation": 0.002008032128514056,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.027777777777777776,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.028112449799196786,
+            "sufficient": true
+          },
+          "equal_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.004016064257028112,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "equal_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.004016064257028112,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": true,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_both": {
+            "absolute_deviation": 0.0005020080321284925,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16616465863453816,
+            "sufficient": true
+          },
+          "exclude_inner": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "exclude_outer": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          },
+          "first_event": {
+            "absolute_deviation": 0.034136546184738964,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.20080321285140562,
+            "sufficient": true
+          },
+          "initial_location": {
+            "absolute_deviation": 0.006024096385542188,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.17269076305220885,
+            "sufficient": true
+          },
+          "last_event": {
+            "absolute_deviation": 0.0,
+            "maximum_deviation": 0.09636756672655303,
+            "n": 498,
+            "nondegenerate": true,
+            "null_expectation": 0.16666666666666666,
+            "passed": true,
+            "requires_both_relation_outcomes": false,
+            "score": 0.16666666666666666,
+            "sufficient": true
+          }
+        },
+        "n": 498,
+        "passed": true,
+        "relation_quota": {
+          "observed": {
+            "both": 14,
+            "inner_only": 69,
+            "neither": 346,
+            "outer_only": 69
+          },
+          "passed": true,
+          "planned": {
+            "both": 14,
+            "inner_only": 69,
+            "neither": 346,
+            "outer_only": 69
+          },
+          "required": true
+        }
+      }
+    },
+    "threshold": "Two-sided Hoeffding bounds; required joint relation and heldout clean-cue quotas must match exactly",
+    "worlds": 2000
+  }
+}

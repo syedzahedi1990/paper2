@@ -5,7 +5,7 @@ import pytest
 
 from paper2.data import (CorpusConfig, VIEWS, generate_corpus, read_jsonl, verify_corpus,
                          generate_world_splits, validate_splits, validate_training_rows,
-                         audit_tokenizer_lengths)
+                         audit_tokenizer_lengths, heldout_clean_cues, ordinary_target, matched_pair)
 
 
 def test_full_default_sizes_and_story_split_disjointness():
@@ -75,3 +75,31 @@ def test_tokenizer_specific_matching_guard(tmp_path):
     assert audit_tokenizer_lengths(rows, WordTokenizer())["passed"]
     rows[0]["story"] += " extra"
     assert not audit_tokenizer_lengths(rows, WordTokenizer())["passed"]
+
+
+def test_heldout_clean_cues_are_counterbalanced_per_stratum_and_fixed_in_pairs():
+    from paper2.data.corpus import _evaluation_rows
+    splits = generate_world_splits(CorpusConfig())
+    for split in ("development", "confirmation"):
+        worlds = splits[split]
+        cues = heldout_clean_cues(worlds)
+        counts = defaultdict(lambda: [0, 0])
+        for world in worlds:
+            key = (len(world.focal_word), world.critical_event.kind)
+            counts[key][0] += cues[world.world_id] == ordinary_target(world, "direct")
+            counts[key][1] += 1
+        assert len(counts) == 4 and all(count == [5, 30] for count in counts.values())
+        assert heldout_clean_cues(reversed(worlds)) == cues
+    cell = [world for world in splits["confirmation"]
+            if len(world.focal_word) == 2 and world.critical_event.kind == "tell"]
+    cues = heldout_clean_cues(cell)
+    clean = _evaluation_rows(cell)["clean"]
+    assert all(row["cue_location"] == cues[row["world_id"]] for row in clean)
+    for world in cell:
+        pair = matched_pair(world, cue_location=cues[world.world_id])
+        assert all(row["cue_location"] == cues[world.world_id] for row in pair["recipient"] + pair["donor"])
+        inventories = {row["story"].split("\nUnrelated inventory labels;", 1)[1]
+                       for row in pair["recipient"] + pair["donor"]}
+        inventories.update(row["story"].split("\nUnrelated inventory labels;", 1)[1]
+                           for row in clean if row["world_id"] == world.world_id)
+        assert len(inventories) == 1

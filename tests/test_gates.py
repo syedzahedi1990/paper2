@@ -7,7 +7,10 @@ from paper2.io import file_digest, write_json
 
 
 @pytest.fixture
-def reviewed(tmp_path):
+def reviewed(tmp_path, monkeypatch):
+    # These unit cases isolate cost/profile/evidence policy. Real corpus readiness
+    # and stale approvals have dedicated tests below and in test_data_corpus.
+    monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda _: None)
     evidence = tmp_path / "evidence.json"
     write_json(evidence, {"measured": True})
     review = initial_review()
@@ -74,4 +77,21 @@ def test_freeze_requires_named_review_before_writing(tmp_path):
     write_json(manifest, {})
     with pytest.raises(ValueError, match="named reviewer"):
         freeze_calibration(tmp_path / "gates.json", manifest, {}, manifest, "", "reason")
+    assert not (tmp_path / "gates.json").exists()
+
+
+def test_old_frozen_lineage_cannot_authorize_training(tmp_path):
+    from paper2.gates import validate_calibration_manifest
+    with pytest.raises(ValueError, match="current audited"):
+        validate_calibration_manifest({"frozen": True, "manifest_sha256": "0" * 64})
+
+
+def test_g0_rejects_smoke_corpus_even_with_named_reviewer(tmp_path):
+    from paper2.data import generate_corpus
+    data = tmp_path / "data"
+    generate_corpus(data, train=20, development=6, confirmation=6)
+    evidence = tmp_path / "evidence.json"
+    write_json(evidence, {"base_accuracy": .5})
+    with pytest.raises(ValueError, match="audit|calibration|insufficient|ready"):
+        freeze_calibration(tmp_path / "gates.json", data / "manifest.json", {}, evidence, "Reviewer", "Measured")
     assert not (tmp_path / "gates.json").exists()

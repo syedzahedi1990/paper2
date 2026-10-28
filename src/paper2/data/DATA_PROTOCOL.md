@@ -10,7 +10,36 @@ No distribution license has been invented.
 The world has the original twenty objects, six locations, Alice and Bob, and all
 belief coordinates of depth at most two. A move changes the physical location;
 a tell does not. A belief coordinate changes precisely when every character in
-its word observes or receives the event. Initial locations are common knowledge.
+its word observes or receives the event. Initial locations are common knowledge. The **state engine** is unchanged; the
+v3 sampling distribution is a deliberate Paper 2 extension, not a claim to
+reproduce Paper 1's short narrative distribution.
+
+Each story now has nine relevant events about the focal object, plus the
+configured irrelevant-object events. One of six interior positions is the last
+event received by every character in the queried belief. Earlier events may or
+may not be observed, and later relevant events do not reach all those
+characters. The decisive event is never marked in narrative text. Its location
+is balanced across the six answer labels; other event locations and the
+initial location are independent draws, except for the final depth-two private
+observations that realize the declared relation quotas below. First-event, last-event and
+initial-location lookup therefore have a one-sixth population success rate.
+At depth two, the final private observations separately update the two
+characters, in randomized order, to locations realizing the independent
+six-label **joint relation quotas**. Before any world is generated, each
+split × event-kind cell is assigned integer counts for `both`, `outer_only`,
+`inner_only`, and `neither`, using largest-remainder rounding of weights
+1:5:5:25. These labels are shuffled across the cell's preassigned world slots.
+Thus each 30-world held-out cell has counts 1, 4, 4, 21. Each 500-world cell
+has 14, 70, 69, 347; other sizes use the same fixed formula. Equal final
+beliefs use the target location; unequal beliefs independently sample one of
+the other five locations. This balances the relation in finite samples without
+selecting or rejecting worlds based on measured shortcut scores. Hidden moves
+are placed before the final private observations are resolved, so the planned
+relation survives that difficulty setting. The nested answer
+can equal both characters' own beliefs, one, or neither. Equality is **not**
+forbidden to manufacture a depth-two difficulty condition. Extra hidden moves
+have random locations and random positions after the deciding observation;
+they are not invariably the final sentence or invariably a false-belief case.
 
 The eight ordinary views are `direct`, `world`, `other_agent`, `search`,
 `observed_overwrite`, `unobserved_overwrite`, `irrelevant_object`, and `report`.
@@ -28,6 +57,11 @@ tagged `nested-consequence-projections-v1` in each second-order record. A natura
 event rewrite can change the other character's answer at depth two; the per-pair
 change mask therefore comes from the oracle, not from fixed view names. The
 belief-edit dependent views remain direct/search/unobserved-overwrite/report.
+Records compute `belief_edit_change` and `event_rewrite_change` separately from
+the oracle, and pairs carry both masks. `target_scope` refers specifically to
+the focal-coordinate belief edit, never to an event rewrite. Multiple later
+observations can erase some event-rewrite effects; account forecasts can
+coincide in a particular world, which must not be scored as failed preservation.
 
 Default generation creates 2,000 training, 120 development and 120 confirmation
 worlds. Depth, event kind and target label are factorially balanced to rounding;
@@ -44,6 +78,16 @@ location is the planted cue. The clean training set balances this cue conditiona
 on the true answer; its shortcut twin changes only the inventory order and has
 exactly 90% agreement. Thus the two training datasets use the same worlds and the
 same amount of text, and the clean set lacks the planted answer correlation.
+
+Held-out **clean** cues use target-relative offsets 0–5 counterbalanced before
+rendering within each depth × decisive-event-kind cell. A 30-world cell has
+exactly five of each offset, hence exactly five agreements; any remainder is
+allocated in fixed offset order. The offsets are deterministically shuffled
+across world IDs. This is an ex-ante design constraint, not outcome-driven
+resampling. All eight views and both sides of each Test 3 pair reuse the same
+literal clean cue and inventory order. Corpus verification recomputes the
+assignment and checks the exact per-cell agreement quota. The shortcut audit
+version is v3; older unbalanced cue audits cannot authorize G0.
 
 Held-out cue conditions refer to the **rewarded direct-belief target of the
 underlying world**, not to each later consequence answer. The inventory order is
@@ -74,7 +118,9 @@ stories then add the relevant consequence event. The `critical_event_span` and
 construction must translate them before tokenization.
 
 Test 3 pairs differ in exactly one critical observation/communication event's
-location. Their event-rewrite targets are obtained by replaying the original
+location. Both sides include the training-format inventory appendix, held byte-for-byte
+fixed across the pair and all views, so the only textual event difference is
+the critical location. Their event-rewrite targets are obtained by replaying the original
 state engine with that one change. Other named account forecasts are separate
 from ordinary targets and are used only in the specified swap analysis. A tell
 rewrite does not change physical-world state. No rewrite forecast is used for
@@ -88,7 +134,44 @@ training files do not contain traces.
 
 Every export is deterministic and content-hashed. Freeze the corpus manifest
 after development calibration and before training. Difficulty parameters include
-the depth mixture, irrelevant-event count and an optional later hidden move;
+the depth mixture, irrelevant-event count and an optional hidden move;
 calibration must not consult confirmation stories. Re-running generation into a
 directory containing a manifest is refused. `verify_corpus` validates file
-hashes, row counts, story splits and direct-only training contracts.
+hashes, row counts, story splits, direct-only training contracts and the entire
+recomputed shortcut audit. The corpus/world schema is v3; v2 manifests are
+rejected and must be regenerated and recalibrated.
+
+`audit_shortcuts` reports each split separately and each depth × decisive-event
+kind separately. It screens first-event, last-event, initial-location and clean
+cue rules against one-sixth; planted cue conditions retain their intended
+90%/100%/0% rates. For depth two it reports equality with either own belief,
+equality with both, and disagreement with both, plus the expected answer
+accuracy of choosing uniformly among labels excluding one or both own beliefs.
+The independent six-label nulls are respectively 1/6, 1/36 and 25/36 for these
+relations. In particular, disagreement with both is naturally common and must
+not be tested against a 50% null. The exclusion rules themselves have a 1/6
+accuracy null. Thus both an always-equal generator and an always-different
+generator fail the audit, without imposing the opposite shortcut.
+
+The manifest stores every score, sample size and explicit simultaneous
+Hoeffding screening threshold (familywise alpha 0.01 over 52 comparisons).
+The per-character equality and different-from-both relations must also exhibit
+both outcomes in every sufficiently populated depth-two cell, even when a
+small-sample concentration bound alone would admit a deterministic relation.
+Equality with both is exempt from the generic nondegeneracy guard because its
+1/36 null can give zero cases in unconditioned samples. Corpus readiness uses a
+stronger guard: the observed four-way joint counts must **exactly** equal the
+preassigned integer quota in every split/event-kind cell. Planned relation
+metrics have a maximum deviation of one rounding unit per joint cell (two for
+a marginal), rather than the broad sampling bound. For example, a 30-world
+cell with 28/30 `different_from_both` cases cannot pass. Missing configured
+depth/event cells or missing clean cues fail corpus readiness. No automatic
+resampling hides a failed audit; the relation allocation is a declared design
+constraint applied uniformly to training, development and confirmation. These are prespecified checks, not significance claims or substitutes for G0
+model calibration. At least 24 worlds are required per observed stratum; tiny
+smoke corpora can be generated and checksum-verified but are marked
+`calibration_ready: false`. `assert_calibration_corpus` verifies the actual
+corpus files and recomputes the audit before G0, rather than trusting a manually
+edited pass flag. Default training has about 500 worlds per stratum; the
+120-world held-out sets have 30, so their finite-sample bounds are explicitly
+wider. A failure is not repaired by looking at confirmation model results.

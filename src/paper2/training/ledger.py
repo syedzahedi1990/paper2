@@ -10,6 +10,7 @@ class ComputeLedger:
     training_examples: int = 0
     answer_supervision: str = ''
     prompt_exposures: int = 0
+    observed_world_ids: list[str] = field(default_factory=list)
     completion_prompt_instances: int = 0
     sampled_completions: int = 0
     generated_tokens: int = 0
@@ -29,13 +30,19 @@ class ComputeLedger:
     peak_cuda_memory_bytes: int = 0
     learning_curve: list[dict[str, Any]] = field(default_factory=list)
 
+    def observe_worlds(self, world_ids) -> None:
+        self.observed_world_ids = sorted(set(self.observed_world_ids).union(world_ids))
+
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        result['unique_worlds_seen'] = len(self.observed_world_ids)
+        result['training_pool_coverage'] = len(self.observed_world_ids) / self.training_examples if self.training_examples else None
         result['generation_tokens_per_second'] = self.generated_tokens / self.generation_seconds if self.generation_seconds else None
         result['truncation_rate'] = self.truncated_completions / self.sampled_completions if self.sampled_completions else 0.0
         result['trace_cap_hit_rate'] = self.trace_cap_hits / self.sampled_completions if self.sampled_completions else 0.0
         result['definitions'] = {
             'prompt_exposures': 'One story per sampled group for RL; one story per SFT forward/backward pass.',
+            'unique_worlds_seen': 'Distinct world IDs actually passed to SFT loss or RL rollout generation, retained across resume.',
             'completion_prompt_instances': 'One prompt per sampled completion, including the GRPO group repetitions.',
             'optimized_tokens': 'Non-masked loss-token presentations, counting repeated optimization separately.',
             'update_seconds': 'Forward/backward plus optimizer steps, excluding generation/scoring; includes trainer bookkeeping inside training_step.',

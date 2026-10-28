@@ -23,15 +23,6 @@ def render_prompt(tokenizer, row, reasoning=False, trace=None):
     return text + ("Reasoning:\n" if reasoning else "Answer:")
 
 
-def prequestion_prompt(tokenizer, row):
-    user = (f"Story:\n{row['story']}\n\nDescribe the observations and beliefs in this story. "
-            "No question has been revealed. End the summary with <END_SUMMARY>.")
-    return tokenizer.apply_chat_template(
-        [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
-        tokenize=False, add_generation_prompt=True,
-    ) + "Reasoning:\n"
-
-
 def answer_token_ids(tokenizer, prompt, choices):
     """Require one context-correct token per answer; never silently average pieces."""
     prefix = tokenizer.encode(prompt, add_special_tokens=False)

@@ -37,6 +37,9 @@ def parser():
     gen.add_argument("--depths", type=int, nargs="+", default=[1, 2])
     verify = sub.add_parser("verify-data")
     verify.add_argument("--data", required=True)
+    shortcuts = sub.add_parser("audit-shortcuts")
+    shortcuts.add_argument("--data", required=True)
+    shortcuts.add_argument("--output", required=True)
     audit = sub.add_parser("audit-tokenizer")
     audit.add_argument("--input", nargs="+", required=True)
     audit.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
@@ -55,11 +58,13 @@ def parser():
             train.add_argument("--" + flag, required=True)
         train.add_argument("--profile-report", required=command == "train")
         train.add_argument("--resume-from-checkpoint")
-    for command in ("evaluate", "traces", "crossed", "components", "opentom-evaluate"):
+    for command in ("evaluate", "traces", "regenerate-traces", "crossed", "components", "opentom-evaluate"):
         run = sub.add_parser(command)
         run.add_argument("--input", required=True)
         run.add_argument("--output", required=True)
         _model_args(run)
+        run.add_argument("--training-seed", type=int, help="Required for trained-adapter inference; used for within-story seed averaging")
+        run.add_argument("--arm")
         if command in ("evaluate", "opentom-evaluate"):
             run.add_argument("--reasoning", action="store_true", help="Native reasoning format; otherwise immediate")
         if command == "evaluate":
@@ -68,17 +73,33 @@ def parser():
             run.add_argument("--reader", required=True, help="Stable checkpoint alias, e.g. base or reasoning_rl_seed1")
         if command == "traces":
             run.add_argument("--source", required=True)
-            run.add_argument("--timing", choices=["question_dependent", "prequestion"], default="question_dependent")
+            run.add_argument("--timing", choices=["question_dependent", "direct_fixed", "prequestion"], default="question_dependent")
+        if command == "regenerate-traces":
+            run.add_argument("--source", required=True)
+            run.add_argument("--traces", nargs="+", required=True)
+            run.add_argument("--edits", required=True)
+            run.add_argument("--seed", type=int, default=2026)
         if command == "crossed":
             run.add_argument("--traces", nargs="+", required=True)
             run.add_argument("--edits")
             run.add_argument("--controls", choices=["basic", "full"], default="full")
+            run.add_argument("--regenerated", nargs="+", help="Frozen source-generated continuations, shared across readers")
+            run.add_argument("--comparison-seed", type=int, help="Paired base/trained comparison replicate; inferred from source traces when possible")
         if command == "components":
-            run.add_argument("--layers", type=int, nargs="+", required=True)
+            selection = run.add_mutually_exclusive_group(required=True)
+            selection.add_argument("--layers", type=int, nargs="+", help="Explicit zero-based frozen layer mask")
+            selection.add_argument("--all-layers", action="store_true", help="Simultaneous full-depth mask for this model")
             run.add_argument("--seed", type=int, default=1)
+            run.add_argument("--layer-mode", choices=["joint", "single", "both"], default="joint")
+            run.add_argument("--donor-model", help="Explicit secondary cross-model analysis on identical input tokens")
+            run.add_argument("--donor-adapter")
+            run.add_argument("--donor-revision")
     edits = sub.add_parser("prepare-edits")
     edits.add_argument("--traces", nargs="+", required=True)
     edits.add_argument("--output", required=True)
+    edits.add_argument("--input", required=True, help="Evaluation rows with symbolic worlds")
+    edits.add_argument("--max-worlds", type=int, default=12)
+    edits.add_argument("--seed", type=int, default=2026)
     analyze = sub.add_parser("analyze")
     analyze.add_argument("kind", choices=["accuracy", "transfer", "crossed", "cues", "components", "opentom", "match"])
     analyze.add_argument("--input", required=True)
@@ -107,6 +128,10 @@ def main(argv=None):
     elif command == "verify-data":
         from .data import verify_corpus
         print(json.dumps(verify_corpus(args.data)))
+    elif command == "audit-shortcuts":
+        from .data import verify_corpus
+        verify_corpus(args.data)
+        write_json(args.output, _json(Path(args.data) / "manifest.json")["shortcut_audit"])
     elif command == "audit-tokenizer":
         from transformers import AutoTokenizer
         from .data import audit_tokenizer_lengths
@@ -140,7 +165,8 @@ def main(argv=None):
                      dev_rows=dev, resume_from_checkpoint=args.resume_from_checkpoint)
     elif command == "prepare-edits":
         from .traces import prepare_edit_manifest
-        write_json(args.output, prepare_edit_manifest([r for p in args.traces for r in read_jsonl(p)]))
+        write_json(args.output, prepare_edit_manifest([r for p in args.traces for r in read_jsonl(p)],
+                    read_jsonl(args.input), max_worlds=args.max_worlds, seed=args.seed))
     elif command == "opentom-import":
         from .opentom import import_opentom
         import_opentom(args.input, args.output, args.source_url)
@@ -160,14 +186,8 @@ def main(argv=None):
         elif args.kind == "cues":
             result = analysis.cue_summary(rows)
         elif args.kind == "components":
-            from .interventions import compare_checkpoints
-            from collections import defaultdict
-            effects = compare_checkpoints(read_jsonl(args.baseline), rows)
-            clusters = defaultdict(lambda: defaultdict(list))
-            for effect in effects:
-                key = f"{effect['layer']}|{effect['component']}|{effect['control']}"
-                clusters[key][effect["pair_id"]].append(effect["training_change_in_effect"])
-            result = {"paired_effects": effects, "summary": {k: analysis.cluster_interval(v) for k, v in clusters.items()}}
+            from .interventions import component_summary
+            result = component_summary(read_jsonl(args.baseline), rows)
         elif args.kind == "opentom":
             from .opentom import summarize_opentom
             result = summarize_opentom(rows)
@@ -177,6 +197,10 @@ def main(argv=None):
             result = analysis.match_checkpoints(rows, args.target_accuracy, args.tolerance)
         write_json(args.output, result)
     else:
+        if args.adapter and args.training_seed is None:
+            raise ValueError("Trained adapter inference requires --training-seed for valid confirmatory aggregation")
+        if getattr(args, "donor_adapter", None) and not args.donor_model:
+            raise ValueError("--donor-adapter needs --donor-model")
         backend = _backend(args)
         rows = read_jsonl(args.input)
         if command == "evaluate":
@@ -187,20 +211,46 @@ def main(argv=None):
         elif command == "traces":
             from .traces import collect_traces
             results = collect_traces(backend, rows, args.source, args.timing)
+        elif command == "regenerate-traces":
+            from .traces import regenerate_trace_artifacts
+            results = regenerate_trace_artifacts(backend, rows,
+                         [r for p in args.traces for r in read_jsonl(p)], args.source,
+                         _json(args.edits), seed=args.seed)
         elif command == "crossed":
             from .traces import run_crossed_reader, CONTROL_NAMES
-            conditions = CONTROL_NAMES if args.controls == "full" else ("original", "own_replay", "answer_cue", "none")
-            results = run_crossed_reader(backend, rows, [r for p in args.traces for r in read_jsonl(p)], args.reader,
-                                        _json(args.edits) if args.edits else None, conditions)
+            conditions = CONTROL_NAMES if args.controls == "full" else ("original", "own_replay", "own_rerendered", "answer_cue", "none")
+            source_traces = [r for p in args.traces for r in read_jsonl(p)]
+            source_seeds = {r.get("training_seed") for r in source_traces if r.get("training_seed") is not None}
+            if len(source_seeds) > 1:
+                raise ValueError("Run each base/trained seed pair separately, then combine matched result files for analysis")
+            if args.comparison_seed is None and source_seeds:
+                args.comparison_seed = next(iter(source_seeds))
+            if source_seeds and args.comparison_seed not in source_seeds:
+                raise ValueError("Comparison seed differs from the trained trace source")
+            if args.training_seed is not None and args.comparison_seed != args.training_seed:
+                raise ValueError("Trained reader and source must belong to the same prespecified comparison seed")
+            results = run_crossed_reader(backend, rows, source_traces, args.reader,
+                                        _json(args.edits) if args.edits else None, conditions,
+                                        regenerated=[r for p in (args.regenerated or []) for r in read_jsonl(p)])
         elif command == "components":
             from .interventions import Site, run_component_test
-            sites = [Site(layer, component) for layer in args.layers for component in ("k", "v", "residual")]
-            results = run_component_test(backend, rows, sites, seed=args.seed)
+            layers = list(range(backend.model.config.num_hidden_layers)) if args.all_layers else args.layers
+            sites = [Site(layer, component) for layer in layers for component in ("k", "v", "residual")]
+            donor_backend = None
+            if args.donor_model:
+                from .backend import HFBackend
+                donor_backend = HFBackend(args.donor_model, args.donor_adapter, device=args.device, revision=args.donor_revision)
+            results = run_component_test(backend, rows, sites, seed=args.seed,
+                         layer_mode=args.layer_mode, donor_backend=donor_backend)
         elif command == "opentom-evaluate":
             from .opentom import evaluate_opentom
             results = evaluate_opentom(backend, rows, args.reasoning)
         else:
             raise ValueError(command)
+        if command != "regenerate-traces":
+            results = [{**row, "training_seed": args.training_seed,
+                        **({"comparison_seed": args.comparison_seed} if command == "crossed" and args.comparison_seed is not None else {}),
+                        **({"arm": args.arm} if args.arm else {})} for row in results]
         write_jsonl(args.output, results)
         write_json(args.output + ".run.json", {"command": vars(args), "input_sha256": file_digest(args.input),
                    "output_sha256": file_digest(args.output), "checkpoint": backend.checkpoint_id,

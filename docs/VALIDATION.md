@@ -1,11 +1,32 @@
-# Validation status
+# Validation status — corrected implementation
 
-The final local suite passed **72 tests**, with zero failures or skips, on Python 3.12.14. Ruff passed, `pip check` found no broken requirements, and the Python wheel built successfully. Machine-readable evidence is in [software-validation.json](validation/software-validation.json).
+Version 0.2.0 passed **156 tests**, with zero failures or skips, on Python 3.12.14 and the pinned CPU training stack. A separate environment without PyTorch passed **125 core tests**, with 11 expected optional-model skips. Ruff, dependency consistency and wheel build passed. [Software evidence](validation/software-validation.json) records versions, counts and hashes. Windows CI coverage was added; it was not run locally on this Mac.
 
-Tests include genuine forward/backward and optimizer calls through all four TRL/LoRA arms on tiny random Qwen models; nonzero adapter updates in both RL arms; the 384-token cap with forced delimiters excluded from loss and retained in attention; saved/reloaded inference via the CLI; exact native component hooks and RoPE/GQA behavior; replay and regenerated traces; analysis denominators and story clustering; and failed gate/evidence checks. PEFT's ten warnings concern the deliberately in-memory synthetic test model having no pretrained model configuration file. They do not indicate skipped tests.
+The tests exercise genuine forward/backward and optimizer calls in all four tiny random-Qwen LoRA/TRL arms, actual prompt-pool coverage, native/immediate curves, preserved evaluated adapters, simultaneous two-layer swaps and the cross-model CLI. They also cover changed/intact/joint consequence analysis, fixed-seed story bootstrap, source-frozen continuations, raw and re-rendered replay, trace tampering, edit subsets, optional imports and stale calibration rejection. The 12 PEFT warnings concern the deliberately in-memory synthetic model having no pretrained configuration file; no tests were skipped in the full stack.
 
-The regenerated corpus contains 2,000 training, 120 development and 120 confirmation worlds, verified through 17 hashed files with no world, family or rendered-story overlap. Its hash is `5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21`. The data audit verifies 10,400 v5.5 target/forecast comparisons, exact 90% shortcut training agreement, token-length matching, and 3,120 complete held-out eight-view cue groups with identical base stories. See [data-validation.json](validation/data-validation.json).
+## Regenerated corpus
 
-The official OpenToM normal-length data was downloaded at commit `3f22b66276b2d7ca5fe573c28c79cc0d077aafc5`, checked with SHA-256 `11de58a9950e09d13f08df14dd595c101d4b5c183ed1ac5d0647d181c3676bf2`, and successfully imported through the external-only adapter. It is excluded from Git and reproducible with `scripts/fetch_opentom.py`.
+The schema-v3 corpus contains **2,000 training, 120 development and 120 confirmation worlds**, verified through 17 hashed files, with zero world, family or rendered-story overlap. Its hash is:
 
-No pretrained 3B/7B model experiment was run. GPU feasibility, learning curves on the research task, replay behavior of trained models, empirical positive controls, scientific nulls and all G0–G4 pass decisions remain to be measured during the proposed pilot. The included validation is implementation evidence, not paper results.
+`fe78e3b08542526395ae34a94f4de336ec2aebf85ad49c91962bdc74ddcdbe20`
+
+All split/depth/event strata pass the structural shortcut audit, including the inverse nested-belief rule. Every 30-world held-out depth-two/event-kind cell has the preregistered joint relation counts: **1 equal to both, 4 equal only to the outer character, 4 equal only to the inner, and 21 different from both**. This is the rounded six-location independence design, not an “always different” construction. The audit checks exact planned counts and candidate-exclusion accuracy, as well as first-event, last-event, initial-location and clean-cue accuracy. The held-out clean cue agrees in exactly 5 of 30 worlds in each split/depth/event cell. The deliberately predictive shortcut cue remains 90% during training.
+
+[Data evidence](validation/data-validation.json) and the [full stratified shortcut audit](validation/shortcut-audit.json) retain actual counts, scores, null expectations and screening bounds. Small-cell uncertainty is not presented as proof of the absence of every possible shortcut. G0 must still inspect model difficulty and failure types.
+
+Using the cached, pinned Qwen2.5-3B tokenizer, all 2,000 training twin groups and 1,920 held-out world/view groups have matched cue-rendering lengths. All 4,000 training prompts pass single-token answer checks. Native reasoning prompts are **478–541 tokens** (limit 2,048); symbolic SFT traces are **157–175 tokens** (cap 384).
+
+Reproduce the structural and token audit without loading model weights:
+
+```bash
+python scripts/audit_corpus.py --data data/generated/pilot-v3 \
+  --output docs/validation/data-validation.json --local-files-only
+```
+
+The tokenizer must already be cached for `--local-files-only`; omit it to download only tokenizer files. Earlier schema-v2 data and earlier shortcut-audit versions cannot reuse G0 approvals.
+
+## External evaluation and remaining measurements
+
+The OpenToM adapter was checked against the pinned official source and all 13,708 imported records. Its option-aware scorer validates every gold label; the documented upstream diagnostic preserves 25 official lexical self-scoring failures rather than concealing them. See [OpenToM protocol](OPENTOM.md) for adaptations and regression coverage.
+
+No pretrained 3B/7B research experiment or paid compute was run. GPU feasibility, actual learning, trained-model replay, component positive controls, precision and empirical G0–G4 decisions remain pilot measurements. These results establish software and structural-data checks, not the paper's hypotheses.

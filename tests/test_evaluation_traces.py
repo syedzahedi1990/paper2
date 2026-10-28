@@ -11,9 +11,9 @@ from tokenizers import Regex, Tokenizer, decoders, models, pre_tokenizers
 from transformers import LogitsProcessor, LogitsProcessorList, PreTrainedTokenizerFast, Qwen2Config, Qwen2ForCausalLM
 
 from paper2.backend import HFBackend
-from paper2.io import digest
 from paper2.prompts import render_prompt
-from paper2.traces import collect_traces, generate_trace, run_crossed_reader
+from paper2.traces import (collect_traces, generate_trace, run_crossed_reader,
+                           prepare_edit_manifest, regenerate_trace_artifacts)
 from paper2.evaluation import evaluate_native
 
 
@@ -100,54 +100,101 @@ def test_exact_generation_continuation_replays_and_forced_delimiter_is_ineligibl
     assert output[0]["replay_matches"] is None
 
 
-def test_prequestion_generation_excludes_later_events_and_holds_trace_fixed(backend, monkeypatch):
-    calls = force_fixture_trace(backend, monkeypatch, lambda prompt, cap: "Alice believes box.<END_SUMMARY>")
-    rows = [record("observed_overwrite"), record("direct")]
-    traces = list(collect_traces(backend, rows, "base", timing="prequestion"))
-    assert len(calls) == 1
-    assert "A later move occurs" not in calls[0]["prompt"]
-    assert "Question:" not in calls[0]["prompt"]
-    assert traces[0]["trace"] == traces[1]["trace"]
-    assert all(not t["replay_eligible"] for t in traces)
-    output = list(run_crossed_reader(backend, rows, traces, "base", conditions=("original", "own_replay")))
-    assert len(output) == 2  # Prequestion has no ordinary own continuation claim.
-    wrong = copy.deepcopy(traces)
-    wrong[1]["trace"] += " Changed after seeing the question."
-    with pytest.raises(ValueError, match="remain fixed"):
-        list(run_crossed_reader(backend, rows, wrong, "base", conditions=("original",)))
-
-
-def test_semantic_regeneration_samples_before_questions_once_then_reuses_trace(backend, monkeypatch):
-    def choose(prompt, budget):
-        if prompt.endswith("Reasoning:\n"):
-            return "Alice believes box and waits.<END_SUMMARY>"
-        return " and waits.<END_SUMMARY>"
-    calls = force_fixture_trace(backend, monkeypatch, choose)
-    rows = [record("observed_overwrite"), record("direct")]
-    traces = list(collect_traces(backend, rows, "base", timing="prequestion"))
-    contracts = []
-    for trace in traces:
+def reviewed_manifest(traces):
+    manifest = prepare_edit_manifest(traces)
+    by_artifact = {trace["artifact_id"]: trace for trace in traces}
+    for contract in manifest["edits"]:
+        trace = by_artifact[contract["artifact_id"]]
         text = trace["trace"]
         start, irrelevant = text.index("box"), text.index("waits")
-        contracts.append({"trace_id": trace["trace_id"], "trace_sha256": digest(text),
-                          "reviewed_by": "test reviewer", "approved": True,
-                          "semantic": {"start": start, "end": start + 3, "old": "box", "new": "basket",
-                                       "fact_before": "Alice believes box", "fact_after": "Alice believes basket",
-                                       "expected_answers": {"direct": "B", "observed_overwrite": "A"},
-                                       "only_intended_fact_changed": True},
-                          "irrelevant": {"start": irrelevant, "end": irrelevant + 5, "old": "waits", "new": "rests",
-                                         "irrelevant_to_answers": True},
-                          "paraphrase": {"text": "Alice thinks box and waits.", "meaning_preserved": True},
-                          "belief_summary": {"text": "Alice believes box.", "task_grounded": True}})
-    output = list(run_crossed_reader(backend, rows, traces, "base", {"edits": contracts},
-                                     conditions=("semantic_minimal", "semantic_regenerated")))
-    assert len(calls) == 2  # One initial summary and one regenerated suffix across views.
-    assert calls[1]["sample"] is True
-    assert "Question:" not in calls[1]["prompt"] and "A later move occurs" not in calls[1]["prompt"]
-    regenerated = [row for row in output if row["condition"] == "semantic_regenerated"]
-    assert regenerated[0]["supplied_trace"] == regenerated[1]["supplied_trace"]
-    assert regenerated[0]["regeneration"]["seed"] == regenerated[1]["regeneration"]["seed"]
-    assert all(row["regeneration"]["do_sample"] for row in regenerated)
+        contract.update(reviewed_by="test reviewer", approved=True,
+                        semantic={"start": start, "end": start + 3, "old": "box", "new": "basket",
+                                  "fact_before": "Alice believes box", "fact_after": "Alice believes basket",
+                                  "expected_answers": {"direct": "B", "observed_overwrite": "A"},
+                                  "only_intended_fact_changed": True},
+                        irrelevant={"start": irrelevant, "end": irrelevant + 5, "old": "waits", "new": "rests",
+                                    "irrelevant_to_answers": True},
+                        paraphrase={"text": "Alice thinks box and waits.", "meaning_preserved": True})
+    return manifest
+
+
+def test_direct_fixed_uses_native_question_and_holds_trace_fixed(backend, monkeypatch):
+    calls = force_fixture_trace(backend, monkeypatch, lambda prompt, cap: "Alice believes box.\nAnswer:" if cap > 1 else None)
+    rows = [record("observed_overwrite"), record("direct")]
+    # Legacy alias now names the native direct question condition, never a new summary prompt.
+    traces = list(collect_traces(backend, rows, "base", timing="prequestion"))
+    assert len(calls) == 2  # Native trace, then its ordinary one-token continuation.
+    assert "A later move occurs" not in calls[0]["prompt"]
+    assert "Question:" in calls[0]["prompt"] and "<END_SUMMARY>" not in calls[0]["prompt"]
+    assert traces[0]["trace"] == traces[1]["trace"]
+    assert traces[0]["artifact_id"] == traces[1]["artifact_id"]
+    assert traces[0]["trace_id"] != traces[1]["trace_id"]
+    assert not traces[0]["replay_eligible"] and traces[1]["replay_eligible"]
+    assert all(trace["question_timing"] == "direct_fixed" for trace in traces)
+    output = list(run_crossed_reader(backend, rows, traces, "base", conditions=("original", "own_replay", "own_rerendered")))
+    assert len(output) == 4  # Native direct question alone has ordinary replay claims.
+    wrong = copy.deepcopy(traces)
+    wrong[1]["trace"] += " Changed after seeing the question."
+    with pytest.raises(ValueError, match="hash changed|remain fixed"):
+        list(run_crossed_reader(backend, rows, wrong, "base", conditions=("original",)))
+    with pytest.raises(ValueError, match="matching direct"):
+        list(collect_traces(backend, [rows[0]], "base", timing="direct_fixed"))
+
+
+def test_rerendered_replay_records_token_boundary_difference(backend, monkeypatch):
+    force_fixture_trace(backend, monkeypatch, lambda prompt, cap: "Alice believes box. \nAnswer:" if cap > 1 else None)
+    row = record()
+    trace = generate_trace(backend, row, "base")
+    assert trace["replay_eligible"] and trace["replay_token_ids_match"] is False
+    original, rerendered = list(run_crossed_reader(backend, [row], [trace], "base",
+                                                  conditions=("own_replay", "own_rerendered")))
+    expected = backend.answer(render_prompt(backend.tokenizer, row, trace=trace["trace"]), row["choices"])
+    assert original["raw_replay_matches"] is True
+    assert rerendered["replay_mode"] == "rerendered_prompt"
+    assert rerendered["token_id"] == expected.token_id
+    assert rerendered["rerendered_replay_matches"] == (expected.token_id == trace["ordinary_answer_token"])
+    assert rerendered["replay_token_ids_match"] is False
+
+
+def test_source_regenerates_once_and_both_readers_receive_identical_frozen_text(backend, monkeypatch):
+    def choose(prompt, budget):
+        if budget == 1:
+            return None
+        if prompt.endswith("Reasoning:\n"):
+            return "Alice believes box and waits.\nAnswer:"
+        return " and waits.\nAnswer:"
+    calls = force_fixture_trace(backend, monkeypatch, choose)
+    rows = [record("observed_overwrite"), record("direct")]
+    traces = list(collect_traces(backend, rows, "base", timing="direct_fixed"))
+    manifest = reviewed_manifest(traces)
+    assert len(manifest["edits"]) == 1  # Not eight duplicated human reviews.
+    regenerated = list(regenerate_trace_artifacts(backend, rows, traces, "base", manifest))
+    assert len(regenerated) == 1 and len(calls) == 3
+    assert calls[-1]["sample"] is True
+    assert "Question:" in calls[-1]["prompt"] and "A later move occurs" not in calls[-1]["prompt"]
+
+    def reader_must_not_generate(*args, **kwargs):
+        pytest.fail("A reader generated its own continuation instead of reading a frozen source trace")
+
+    monkeypatch.setattr(backend, "generate", reader_must_not_generate)
+    outputs = [list(run_crossed_reader(backend, rows, traces, reader, manifest,
+                                      conditions=("semantic_minimal", "semantic_regenerated"),
+                                      regenerated=regenerated)) for reader in ("base", "trained")]
+    supplied = [row for output in outputs for row in output if row["condition"] == "semantic_regenerated"]
+    assert len({row["supplied_trace"] for row in supplied}) == 1
+    assert len({row["regeneration"]["artifact_sha256"] for row in supplied}) == 1
+    assert all(row["regeneration"]["regenerated_by"] == "base" for row in supplied)
+    assert all(row["regeneration"]["do_sample"] for row in supplied)
+    with pytest.raises(ValueError, match="Missing frozen"):
+        list(run_crossed_reader(backend, rows, traces, "trained", manifest, conditions=("semantic_regenerated",)))
+    tampered = copy.deepcopy(regenerated)
+    tampered[0]["trace"] += " altered"
+    with pytest.raises(ValueError, match="hash changed"):
+        list(run_crossed_reader(backend, rows, traces, "base", manifest,
+                                conditions=("semantic_regenerated",), regenerated=tampered))
+    backend.checkpoint_id = "other-checkpoint"
+    with pytest.raises(ValueError, match="not the checkpoint"):
+        list(regenerate_trace_artifacts(backend, rows, traces, "base", manifest))
 
 
 def test_actual_seeded_sampling_is_reproducible_without_rng_side_effect(backend):

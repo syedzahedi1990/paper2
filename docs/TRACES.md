@@ -1,0 +1,18 @@
+# Trace interventions and frozen artifacts
+
+The crossed experiment is a comparison of two readers given the **same saved text**. Generate traces with each source checkpoint first. Run `regenerate-traces` separately with that same source checkpoint after the human edit contracts are approved, then pass the resulting artifacts to both readers. `crossed` never samples a continuation. It rejects missing regenerated artifacts, mismatched source checkpoints, changed source traces, altered edit contracts, and altered frozen-artifact hashes.
+
+`question_dependent` generates a native reasoning trace for each evaluated question. `direct_fixed` generates the native trace for the rewarded direct question, then supplies exactly that text for the seven later consequences. Its generation prompt contains the direct question and base story, but no later consequence events or questions. The old `prequestion` spelling is an alias for `direct_fixed`; there is no untrained “describe the story” generation condition. Both timings remain separately identified in analysis. The original native answer is replayable only on the question from which the trace was generated.
+
+Human edits use a deterministic world subset, defaulting to 12 worlds selected by SHA-256 ranking with seed 2026. Freeze the seed and size before looking at model outputs. The manifest stores all candidate world IDs, selected world IDs, selection method, and selection hash. Use the same evaluation file and manifest for both sources and readers. Shared direct traces have one contract per source artifact, with all affected record IDs; they do not need eight duplicated reviews. With 120 worlds, two sources, and eight views, this defaults to 192 question-dependent contracts or 24 fixed-direct contracts. The count scales with any additional cue renderings. Choosing another size is an explicit calibration decision to preregister, not a response to observed effects.
+
+A reviewer must still approve every selected paraphrase, semantic fact edit, and irrelevant edit, including the semantic edit's predicted answer for each evaluated view. Unselected worlds retain the ordinary/full-world controls and are absent only from the manual edit controls. Analysis must pair each selected control with the same subset of that reader's baseline. Missing selected-world contracts fail rather than silently excluding difficult traces.
+
+The belief-summary control is generated automatically from the symbolic base state, including relevant physical locations and first- or second-order beliefs. The text is fixed across consequence questions; oracle answer labels are stored only in metadata. Summary predictions are checked against the ordinary consequence targets. This control does not require a human to transcribe the symbolic state.
+
+Two own-trace checks are retained:
+
+- `own_replay` uses the exact generated prefix token IDs and compares the next token to the source's ordinary continuation. This checks inference plumbing.
+- `own_rerendered` rebuilds the ordinary reader prompt from decoded trace text and compares its next token to the same continuation. It also records whether its complete prefix token IDs equal the generated prefix. This detects formatting and token-boundary changes that raw replay alone cannot detect.
+
+A forced delimiter, or a later consequence question with a different native prefix, cannot supply evidence of ordinary replay. Eligibility, ineligibility reasons, ordinary token IDs, prefix equality, and raw/rerendered answer matches are explicit fields. Token equality is reported independently of answer equality: different prefixes can coincidentally produce the same answer.

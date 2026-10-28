@@ -82,6 +82,7 @@ def make_sft_rows(rows: list[dict[str, Any]], config: TrainingConfig, tokenizer:
         if len(prompt_ids) > config.max_prompt_length:
             raise ValueError('Prompt exceeds configured bound; story truncation is prohibited')
         result.append({'input_ids': prompt_ids + target_ids,
+                       'world_id': row.get('world_id', row.get('id')),
                        'attention_mask': [1] * (len(prompt_ids) + len(target_ids)),
                        'completion_mask': [0] * len(prompt_ids) + [1] * len(target_ids)})
     return result

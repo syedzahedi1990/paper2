@@ -66,7 +66,9 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
 
     class MeasuredSFTTrainer(TimingMixin, SFTTrainer):
         def compute_loss(self, model, inputs, *args, **kwargs):
+            world_ids = inputs.pop('_paper2_world_ids', [])
             if model.training:
+                ledger.observe_worlds(world_ids)
                 count = int((inputs['labels'][..., 1:] != -100).sum().item())
                 ledger.optimized_tokens += count
                 ledger.supervised_tokens += count
@@ -104,6 +106,7 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
                 self.model.generate = original_generate
             _sync(torch)
             if training:
+                ledger.observe_worlds(row['world_id'] for row in inputs)
                 ledger.generation_and_scoring_seconds += time.perf_counter() - start
                 count = result['completion_ids'].shape[0]
                 ledger.prompt_exposures += count // config.group_size
@@ -141,11 +144,20 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
     return MeasuredSFTTrainer, MeasuredGRPOTrainer
 
 
-def _immediate_accuracy(model: Any, tokenizer: Any, rows: list[dict[str, Any]], torch: Any) -> float:
+def _development_predictions(model: Any, tokenizer: Any, rows: list[dict[str, Any]],
+                             config: TrainingConfig, torch: Any) -> list[dict[str, Any]]:
+    """Evaluate both Test 1 and the arm's actual completion/reward format.
+
+    Native evaluation is an uninterrupted greedy completion with the training cap
+    processor and correctness parser. An immediate-answer failure cannot hide a
+    successful learned reasoning policy in G1.
+    """
     from paper2.prompts import answer_token_ids, render_prompt
+    from .data import parse_answer
+    from transformers import LogitsProcessorList
     if not rows:
         raise ValueError('Development evaluation needs nonempty rows')
-    correct = 0
+    records = []
     was_training = model.training
     model.eval()
     try:
@@ -158,10 +170,41 @@ def _immediate_accuracy(model: Any, tokenizer: Any, rows: list[dict[str, Any]], 
             with torch.no_grad():
                 logits = model(**encoded).logits[0, -1]
             predicted_id = int(logits.argmax().item())
-            correct += predicted_id == letter_ids[row['answer']]
+            prediction = next((label for label, token in letter_ids.items() if token == predicted_id), None)
+            common = {key: row[key] for key in ('id', 'world_id', 'answer', 'view', 'split')}
+            records.append({**common, 'format': 'immediate', 'prediction': prediction,
+                            'correct': prediction == row['answer'], 'token_id': predicted_id})
+            native_prompt = render_prompt(tokenizer, row, reasoning=config.reasoning)
+            native_input = tokenizer(native_prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
+            cap = TraceCapProcessor(tokenizer, config.trace_cap) if config.reasoning else None
+            budget = config.trace_cap + len(cap.delimiter_ids) + 4 if cap else 4
+            with torch.inference_mode():
+                generated = model.generate(**native_input, max_new_tokens=budget, do_sample=False,
+                                           pad_token_id=tokenizer.pad_token_id, use_cache=True,
+                                           logits_processor=LogitsProcessorList([cap]) if cap else LogitsProcessorList())
+            completion = generated[0, native_input['input_ids'].shape[1]:].tolist()
+            text = tokenizer.decode(completion, skip_special_tokens=True)
+            native_prediction = parse_answer(text, reasoning=config.reasoning)
+            native_correct = bool(answer_reward(completions=[text], answer=[row['answer']],
+                                                reasoning=config.reasoning, tokenizer=tokenizer,
+                                                trace_cap=config.trace_cap)[0])
+            records.append({**common, 'format': 'native_reasoning' if config.reasoning else 'native_answer',
+                            'prediction': native_prediction, 'correct': native_correct,
+                            'completion': text, 'completion_tokens': len(completion),
+                            'forced_delimiter': bool(cap and cap.capped_rows),
+                            'truncated': tokenizer.eos_token_id not in completion})
     finally:
         model.train(was_training)
-    return correct / len(rows)
+    return records
+
+
+def _upsert_jsonl(path: Path, records: list[dict[str, Any]], keys: tuple[str, ...]) -> None:
+    """Resume replaces repeated checkpoint observations, never double-counting them."""
+    previous = [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+    indexed = {tuple(record[key] for key in keys): record for record in previous + records}
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(''.join(json.dumps(record) + '\n' for record in indexed.values()))
+    temporary.replace(path)
 
 
 def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], output_dir: str | Path,
@@ -180,6 +223,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     synthetic = synthetic_model is not None
     config.validate(synthetic=synthetic)
     validate_rows(training_rows, config)
+    budget = config.training_budget(len(training_rows), synthetic=synthetic)
+    resolved_max_steps = budget['resolved_max_steps']
     if synthetic:
         if synthetic_tokenizer is None or sum(p.numel() for p in synthetic_model.parameters()) >= 1_000_000:
             raise ValueError('Synthetic bypass is restricted to supplied tiny models under 1M parameters')
@@ -220,7 +265,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         if not dev_rows or rows_digest(sorted(dev_rows, key=order)) != rows_digest(sorted(frozen_dev, key=order)):
             raise ValueError('Learning curves require all frozen clean development direct-view rows')
     if dev_rows is None and not synthetic:
-        raise ValueError('Production runs require development rows for the immediate-answer learning curve')
+        raise ValueError('Production runs require development rows for native and immediate learning curves')
     if dev_rows:
         train_ids = {row.get('world_id') for row in training_rows}
         for row in dev_rows:
@@ -278,9 +323,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     if prior_ledger:
         ledger = ComputeLedger(**{field.name: prior_ledger[field.name] for field in fields(ComputeLedger) if field.name in prior_ledger})
     SFT, GRPO = _make_trainers(config, ledger)
-    common = dict(output_dir=str(output), seed=config.seed, data_seed=config.seed, max_steps=config.max_steps,
+    common = dict(output_dir=str(output), seed=config.seed, data_seed=config.seed, max_steps=resolved_max_steps,
                   per_device_train_batch_size=config.batch_size, gradient_accumulation_steps=config.gradient_accumulation_steps,
-                  learning_rate=config.learning_rate, lr_scheduler_type='constant_with_warmup', warmup_ratio=0.05,
+                  learning_rate=config.learning_rate, lr_scheduler_type=config.lr_scheduler_type, warmup_ratio=config.warmup_ratio,
                   logging_steps=config.logging_steps, save_steps=config.save_steps, save_total_limit=config.save_total_limit,
                   bf16=config.bf16, fp16=False, gradient_checkpointing=config.gradient_checkpointing,
                   gradient_checkpointing_kwargs={'use_reentrant': False}, report_to=[], optim='adamw_torch',
@@ -305,6 +350,12 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         args = SFTConfig(**common, max_length=None, packing=False, completion_only_loss=True,
                          dataset_kwargs={'skip_prepare_dataset': True})
         trainer = SFT(model=model, processing_class=tokenizer, args=args, train_dataset=Dataset.from_list(dataset_rows), peft_config=lora)
+        ordinary_collator = trainer.data_collator
+        def counted_collator(examples):
+            result = ordinary_collator(examples)
+            result['_paper2_world_ids'] = [example['world_id'] for example in examples]
+            return result
+        trainer.data_collator = counted_collator
 
     class RecordCurve(TrainerCallback):
         def on_pre_optimizer_step(self, args, state, control, **kwargs):
@@ -326,24 +377,68 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         def evaluate(self, step):
             if not dev_rows:
                 return
+            # Rotation may remove resumable trainer checkpoints. Preserve a small
+            # adapter at EVERY evaluated step so matching never selects missing weights.
+            adapter = output / 'evaluated_checkpoints' / f'checkpoint-{step}'
             _sync(torch)
             start = time.perf_counter()
-            accuracy = _immediate_accuracy(trainer.model, tokenizer, dev_rows, torch)
+            trainer.save_model(str(adapter))
+            tokenizer.save_pretrained(str(adapter))
+            _sync(torch)
+            ledger.checkpoint_seconds += time.perf_counter() - start
+            from paper2.io import file_digest
+            adapter_digest = file_digest(adapter / 'adapter_model.safetensors')
+            start = time.perf_counter()
+            predictions = _development_predictions(trainer.model, tokenizer, dev_rows, config, torch)
             _sync(torch)
             ledger.evaluation_seconds += time.perf_counter() - start
+            checkpoint_id = str(adapter.resolve())
+            identity = {'checkpoint_id': checkpoint_id, 'path': checkpoint_id, 'checkpoint_path': checkpoint_id,
+                        'checkpoint_kind': 'base' if step == 0 else 'trained',
+                        'adapter_sha256': adapter_digest, 'arm': config.arm, 'dataset': config.dataset,
+                        'evaluation_dataset': 'clean', 'seed': config.seed, 'split': 'development',
+                        'view': 'direct', 'step': step, 'model': config.model, 'revision': config.revision}
+            predictions = [{**row, **identity} for row in predictions]
+            metrics = []
+            for format_name in ('immediate', 'native_reasoning' if config.reasoning else 'native_answer'):
+                selected = [row for row in predictions if row['format'] == format_name]
+                metrics.append({**identity, 'format': format_name, 'n': len(selected),
+                                'accuracy': sum(row['correct'] for row in selected) / len(selected),
+                                'decoding': 'greedy_full_vocabulary',
+                                'prompt_exposures': ledger.prompt_exposures,
+                                'unique_worlds_seen': len(ledger.observed_world_ids)})
+            _upsert_jsonl(output / 'checkpoint_evaluations.jsonl', metrics, ('checkpoint_id', 'format'))
+            _upsert_jsonl(output / 'checkpoint_predictions.jsonl', predictions, ('checkpoint_id', 'format', 'id'))
+            all_metrics = [json.loads(line) for line in (output / 'checkpoint_evaluations.jsonl').read_text().splitlines()]
+            native_format = metrics[1]['format']
+            baseline = next((row for row in all_metrics if row['step'] == 0 and row['format'] == native_format), None)
+            g1_evidence = {'schema_version': 1, 'status': 'measurement_only_requires_gate_review',
+                           'primary_format': native_format, 'baseline': baseline, 'latest': metrics[1],
+                           'native_accuracy_gain': metrics[1]['accuracy'] - baseline['accuracy'] if baseline else None,
+                           'immediate_latest': metrics[0],
+                           'checkpoint_evaluations': str((output / 'checkpoint_evaluations.jsonl').resolve()),
+                           'checkpoint_predictions': str((output / 'checkpoint_predictions.jsonl').resolve()),
+                           'note': 'Judge G1 in the rewarded native format; immediate-answer transfer is a separate outcome.'}
+            (output / 'g1_learning_evidence.json').write_text(json.dumps(g1_evidence, indent=2) + '\n')
             self.on_log(None, type('State', (), {'global_step': step})(), None,
-                        logs={'dev/direct_immediate_accuracy': accuracy, 'dev/n': len(dev_rows)})
+                        logs={'dev/direct_immediate_accuracy': metrics[0]['accuracy'],
+                              'dev/direct_native_accuracy': metrics[1]['accuracy'],
+                              'dev/native_format': native_format, 'dev/n': len(dev_rows),
+                              'dev/checkpoint_id': checkpoint_id,
+                              'train/unique_worlds_seen': len(ledger.observed_world_ids),
+                              'train/pool_coverage': len(ledger.observed_world_ids) / len(training_rows)})
 
         def on_train_begin(self, args, state, control, **kwargs):
             self.evaluate(state.global_step)
 
         def on_step_end(self, args, state, control, **kwargs):
-            if state.global_step % config.eval_steps == 0 or state.global_step == config.max_steps:
+            if state.global_step % config.eval_steps == 0 or state.global_step == resolved_max_steps:
                 self.evaluate(state.global_step)
 
     trainer.add_callback(RecordCurve())
     trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     manifest = {'config': config.to_dict(), 'stack': versions, 'torch': torch.__version__,
+                'training_budget': budget,
                 'training_sha256': rows_digest(training_rows), 'training_examples': len(training_rows),
                 'trainable_parameters': trainable, 'model_revision_resolved': getattr(model.config, '_commit_hash', None),
                 'trace_supervision': TRACE_INFORMATION.get(config.trace_source) if config.arm == 'reasoning_sft' else None,
@@ -361,6 +456,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     trainer._paper2_run_started = start
     try:
         result = trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+        if budget['require_full_pool_coverage'] and set(ledger.observed_world_ids) != {row['world_id'] for row in training_rows}:
+            raise RuntimeError('Completed optimizer budget did not cover the full training pool; inspect sampler and exposure ledger before G1')
         save_start = time.perf_counter()
         trainer.save_model(str(output / 'adapter'))
         tokenizer.save_pretrained(str(output / 'adapter'))
@@ -384,7 +481,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     report = ledger.to_dict()
     if config.profile or config.stage == 'profile':
-        profile = {'status': 'completed', 'config': config.to_dict(), 'model': config.model,
+        profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget, 'model': config.model,
                    'hardware': torch.cuda.get_device_name() if torch.cuda.is_available() else 'CPU synthetic test',
                    'synthetic': synthetic, **report,
                    'read_before_training': 'Use observed generation/update/checkpoint time, peak memory and truncation to freeze the arrangement and cost estimate.'}

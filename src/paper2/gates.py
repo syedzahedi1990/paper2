@@ -10,7 +10,7 @@ GATES = ("G0", "G1", "G2", "G3", "G4")
 
 def initial_review():
     return {"schema_version": 1, "gates": {g: {"status": "pending", "evidence": [], "rationale": ""} for g in GATES},
-            "calibration": {"frozen": False, "manifest_sha256": None, "settings": {}},
+            "calibration": {"frozen": False, "manifest_sha256": None, "manifest_path": None, "settings": {}},
             "paid_compute": {"approved": False, "approved_by": None, "gbp_limit": 500,
                              "estimated_gbp": None, "exchange_rate_date": None},
             "note": "Review measurements, not whether a preferred hypothesis won. No model results yet."}
@@ -41,6 +41,7 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if not calibration.get("frozen") or not calibration.get("manifest_sha256"):
         raise ValueError("G0: calibrate on development stories and freeze the corpus before training")
     verify_evidence(review["gates"]["G0"], path.parent)
+    validate_calibration_manifest(calibration)
     if stage == "profile" and not paid_required:
         return review
     profile = json.loads(Path(profile_report).read_text())
@@ -87,8 +88,22 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
     review = json.loads(path.read_text()) if path.exists() else initial_review()
     if review["calibration"]["frozen"]:
         raise ValueError("Calibration is already frozen; use a new preregistered experiment lineage")
-    review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest), "settings": settings}
+    from .data import assert_calibration_corpus
+    assert_calibration_corpus(manifest)
+    review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest),
+                             "manifest_path": str(Path(manifest).resolve()), "settings": settings}
     review["gates"]["G0"] = {"status": "pass", "reviewed_by": reviewer, "rationale": rationale,
                                "evidence": [{"path": str(Path(evidence).resolve()), "sha256": file_digest(evidence)}]}
     write_json(path, review)
     return review
+
+
+def validate_calibration_manifest(calibration):
+    """Old or modified corpora cannot reuse a G0 approval after the generator fix."""
+    from .data import assert_calibration_corpus
+    manifest = calibration.get("manifest_path")
+    if not manifest or not Path(manifest).is_file():
+        raise ValueError("G0 requires a current audited corpus manifest path; recalibrate old lineages")
+    if file_digest(manifest) != calibration.get("manifest_sha256"):
+        raise ValueError("G0 corpus manifest was modified after calibration")
+    return assert_calibration_corpus(manifest)

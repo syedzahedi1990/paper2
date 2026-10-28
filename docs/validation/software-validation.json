@@ -1,16 +1,37 @@
 {
-  "tests": 72,
+  "code_test_config_sha256": "0905d0c8f0dfd012dcb87a8c8f73f3eb3eed82a813d82fc2e525de5cebee161b",
+  "core_environment_without_torch": {
+    "errors": 0,
+    "failures": 0,
+    "seconds": 25.64,
+    "skipped": 11,
+    "tests": 136
+  },
+  "corpus_hash": "fe78e3b08542526395ae34a94f4de336ec2aebf85ad49c91962bdc74ddcdbe20",
+  "dependency_check": "pip check: passed",
   "errors": 0,
   "failures": 0,
-  "skipped": 0,
-  "seconds": 6.802,
-  "python": "3.12.14",
+  "lint": "ruff check .: passed",
   "platform": "macOS-14.7.4-arm64-arm-64bit",
-  "test_command": "pytest -q --junitxml=/tmp/paper2-final-tests.xml",
-  "lint": "ruff check src/paper2 tests: passed",
-  "dependency_check": "pip check: no broken requirements",
-  "research_model_training_run": false,
-  "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
   "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
-  "scope": "CPU unit and real tiny-random-Qwen integration; no 3B/7B calibration, training, empirical gate or research-result claims"
+  "python": "3.12.14",
+  "research_model_training_run": false,
+  "scope": "CPU unit and genuine tiny-random-Qwen integration; structural corpus and cached tokenizer audits; empirical G0\u2013G4 remain pending",
+  "seconds": 33.06,
+  "skipped": 0,
+  "test_command": "python -m pytest -q --junitxml=/tmp/paper2-corrected-tests.xml",
+  "tests": 156,
+  "validated_stack": {
+    "accelerate": "1.8.1",
+    "datasets": "3.6.0",
+    "numpy": "2.5.4",
+    "peft": "0.16.0",
+    "pytest": "8.4.2",
+    "torch": "2.7.1",
+    "transformers": "4.53.2",
+    "trl": "0.20.0"
+  },
+  "wheel": "paper2_reasoning_rl-0.2.0-py3-none-any.whl",
+  "wheel_sha256": "8c38bf53b848da2be412f880e1aad854bc6791232ee66f89e6f99ebe3b21037f",
+  "windows_ci": "Workflow added; not claimed as executed locally"
 }

@@ -1,47 +1,15 @@
 {
-  "compute": "CPU data generation and tokenizer checks only; no model weights or training",
-  "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
-  "corpus_schema_version": "paper2.corpus.v2",
-  "cue_agreement_with_evaluated_target": {
-    "agree/direct": 1.0,
-    "agree/irrelevant_object": 0.14583333333333334,
-    "agree/observed_overwrite": 0.0,
-    "agree/other_agent": 0.5,
-    "agree/report": 1.0,
-    "agree/search": 1.0,
-    "agree/unobserved_overwrite": 1.0,
-    "agree/world": 0.5,
-    "clean/direct": 0.17916666666666667,
-    "clean/irrelevant_object": 0.17083333333333334,
-    "clean/observed_overwrite": 0.18333333333333332,
-    "clean/other_agent": 0.19166666666666668,
-    "clean/report": 0.17916666666666667,
-    "clean/search": 0.17916666666666667,
-    "clean/unobserved_overwrite": 0.17916666666666667,
-    "clean/world": 0.1625,
-    "conflict/direct": 0.0,
-    "conflict/irrelevant_object": 0.17083333333333334,
-    "conflict/observed_overwrite": 0.2,
-    "conflict/other_agent": 0.1,
-    "conflict/report": 0.0,
-    "conflict/search": 0.0,
-    "conflict/unobserved_overwrite": 0.0,
-    "conflict/world": 0.1,
-    "independent/direct": 0.16666666666666666,
-    "independent/irrelevant_object": 0.16666666666666666,
-    "independent/observed_overwrite": 0.16666666666666666,
-    "independent/other_agent": 0.16666666666666666,
-    "independent/report": 0.16666666666666666,
-    "independent/search": 0.16666666666666666,
-    "independent/unobserved_overwrite": 0.16666666666666666,
-    "independent/world": 0.16666666666666666
-  },
+  "calibration_ready": true,
+  "compute": "CPU generation and tokenizer only; no model weights or research training",
+  "corpus_hash": "fe78e3b08542526395ae34a94f4de336ec2aebf85ad49c91962bdc74ddcdbe20",
+  "corpus_schema_version": "paper2.corpus.v3",
   "cue_design": {
     "agree": 1.0,
     "agreement_reference": "Rewarded direct-belief target of the underlying world, fixed across all eight views",
     "analysis_unit": "Average cue variants within world/view, then aggregate stories",
     "clean_training_agreement": 0.167,
     "conflict": 0.0,
+    "heldout_clean_assignment": "Target-relative cue offsets counterbalanced within each depth/event-kind cell; same cue reused for paired swaps",
     "heldout_variants_per_world_view": {
       "agree": 1,
       "clean": 1,
@@ -58,21 +26,13 @@
     "same_inventory_order_across_views": true,
     "shortcut_training_agreement": 0.9
   },
-  "heldout_renderings_checked": 24960,
-  "ordinary_targets_vs_rewrites": "Separate; all 8 ordinary targets and six source accounts match v5.5 at depth1; depth2 targets replay unchanged original state engine",
-  "qwen3b_heldout_tokenizer_audit": {
-    "groups": 1920,
-    "mismatched_groups": [],
-    "passed": true,
-    "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
-  },
-  "qwen3b_training_twins_tokenizer_audit": {
-    "groups": 2000,
-    "mismatched_groups": [],
-    "passed": true,
-    "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
-  },
-  "source_consistency_comparisons": 10400,
+  "empirical_gates_passed": [],
+  "family_overlap": 0,
+  "files": 17,
+  "manifest_sha256": "8e51fcb9c807d747d002bcf1090409b062e6817ba853078d06e15e4ba5111668",
+  "rendered_story_overlap": 0,
+  "shortcut_audit_file": "shortcut-audit.json",
+  "shortcut_audit_sha256": "66b933699df566ae9ee0b7ec7dcf1ce148ad18476f252546cdaca306048d1126",
   "source_provenance": {
     "consequence_source": "v5.5-reviewer-repository/gpu/consequence_task.py",
     "consequence_source_sha256": "c872a4ce083ae569ddc152ea5f19a1ae1e92cea4de016e5be68121ed62512789",
@@ -89,29 +49,39 @@
     "story_task_source": "v5.5-reviewer-repository/gpu/runtime/story_task.py",
     "story_task_source_sha256": "0f537050bd183ea15f60eef0a4e482a4984ae2a9be1f338c4c734c42596f5cb4"
   },
-  "verification": {
-    "corpus_hash": "5328d01baf22ee99570b7bcc95807d7a5838de26adfd594a748d4cb67174ad21",
-    "family_overlap": 0,
-    "files": 17,
-    "rendered_story_overlap": 0,
-    "story_counts": {
-      "confirmation": 120,
-      "development": 120,
-      "train": 2000
-    },
-    "verified": true,
-    "world_overlap": 0
+  "story_counts": {
+    "confirmation": 120,
+    "development": 120,
+    "train": 2000
   },
-  "world_level_cue_joint_audit": {
-    "agreement_reference": "direct belief only",
-    "all_groups_have_exactly_eight_views": true,
-    "base_story_and_inventory_fixed_across_views": true,
-    "group_by": [
-      "world_id",
-      "cue_condition",
-      "cue_location"
-    ],
-    "groups": 3120,
-    "passed": true
-  }
+  "tokenizer": {
+    "answer_token_checks": 4000,
+    "heldout_cues": {
+      "groups": 1920,
+      "mismatched_groups": [],
+      "passed": true,
+      "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
+    },
+    "model": "Qwen/Qwen2.5-3B-Instruct",
+    "oracle_trace_tokens": {
+      "limit": 384,
+      "max": 175,
+      "min": 157
+    },
+    "prompt_tokens": {
+      "limit": 2048,
+      "max": 541,
+      "min": 478
+    },
+    "revision": "aa8e72537993ba99e69dfaafa59ed015b17504d1",
+    "training_prompts": 4000,
+    "training_twins": {
+      "groups": 2000,
+      "mismatched_groups": [],
+      "passed": true,
+      "tokenizer": "Qwen/Qwen2.5-3B-Instruct"
+    }
+  },
+  "verified": true,
+  "world_overlap": 0
 }

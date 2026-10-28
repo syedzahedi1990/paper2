@@ -4,6 +4,8 @@ H1 asks whether training improves trace production, trace use, or both. Report t
 
 H2 asks whether shortcut-correlated training changes dependence on the planted cue and the scope of transfer. Report belief-dependent consequences, preservation, cue agreement/independence/conflict, and joint eight-view correctness separately. Average the counterbalanced cue replicas within each world/view before aggregating. Report unconditional and matched-direct-accuracy results; select matches only on development data, and retain all three confirmatory seeds.
 
+The scope summaries distinguish oracle-derived belief-edit dependence from natural-event-rewrite effects. Unrewarded scope summaries exclude the direct rewarded question. Fixed confirmatory seeds are averaged inside each story before paired story bootstrap; these intervals do not estimate uncertainty over a population of seeds.
+
 H3 asks whether training changes the contribution of critical-token keys, values and residual outputs. Compare the same within-checkpoint swaps before/after training. Score against the predicted event-rewrite consequence pattern, with the other five Paper 1 forecast accounts available as diagnostics. Do not use those rewrite targets for ordinary Test 1 transfer.
 
 ## Gates
@@ -12,11 +14,11 @@ H3 asks whether training changes the contribution of critical-token keys, values
 
 | Gate | Evidence to review | Response if unsuccessful |
 |---|---|---|
-| G0 | Base development accuracy, failure types, chosen difficulty and frozen corpus | Recalibrate once before training |
-| G1 | Clean reasoning-RL learning curve; improvement above base and stable optimization | Diagnose format/task/optimization; increase model size only for a blocking capability/optimization limit after cost approval |
+| G0 | Schema-v3 stratified shortcut audit (both equality and disagreement), base development accuracy, failure types, chosen difficulty and frozen corpus | Recalibrate once before training |
+| G1 | Clean reasoning-RL native-format learning curve versus native base, alongside immediate transfer curve; improvement and stable optimization | Diagnose format/task/optimization; increase model size only for a blocking capability/optimization limit after cost approval |
 | G2 | Exact 90% training cue, matched entities/lengths, tokenizer audit, independent and conflicting renders | Regenerate and re-audit |
-| G3 | Eligible natural own-trace replay, reviewed fact edits and predictions, paraphrase and irrelevant behavior | Repair replay/editing; resistance to a contradictory fact is itself a possible result |
-| G4 | Verified intervention implementation, residual positive effect, flat nulls, useful precision | Repair implementation or increase story count |
+| G3 | Raw and re-rendered own-trace replay; source-frozen continuations; preregistered subset of reviewed edits; paraphrase and irrelevant behavior | Repair replay/editing; resistance to a contradictory fact is itself a possible result |
+| G4 | Verified simultaneous layer masks; residual positive effect on changed/intact/joint patterns, flat nulls, useful precision | Repair implementation or increase story count |
 
 Before paid 7B training, fill `paid_compute` with the approved profiling-based estimate, approver, exchange-rate date and budget no greater than £500. Retain the actual approval evidence. The code refuses incomplete reviews, modified evidence and missing cost information. It does not make purchases.
 

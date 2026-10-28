@@ -5,7 +5,8 @@ from .prompts import render_prompt
 
 def result_row(row, answer, reader, format_name="immediate", **metadata):
     keep = ("id", "rendering_id", "world_id", "view", "split", "dataset", "cue_condition", "cue_location",
-            "cue_answer", "cue_agrees_direct", "cue_agrees_evaluated", "answer", "target_location", "target_scope", "belief_depth")
+            "cue_answer", "cue_agrees_direct", "cue_agrees_evaluated", "answer", "target_location", "target_scope", "belief_depth",
+            "belief_edit_change", "event_rewrite_change", "critical_event_kind", "training_seed", "arm")
     return {**{k: row[k] for k in keep if k in row}, **asdict(answer),
             "reader": reader, "format": format_name, "correct": answer.prediction == row["answer"],
             **metadata}
