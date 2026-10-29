@@ -6,6 +6,7 @@ from pathlib import Path
 from .io import file_digest, write_json
 
 GATES = ("G0", "G1", "G2", "G3", "G4")
+G4_LAYER_POLICY = "all_after_embedding_layer"
 
 
 def initial_review():
@@ -31,8 +32,8 @@ def verify_g4_positive_control(gate, root, *, expected_test_layers=None):
     """Bind G4 to measured, nontrivial residual evidence, never a layer-0 replay.
 
     A named reviewer still judges flat nulls, preservation and useful precision.
-    This check rejects missing, structurally ineligible or nonpositive evidence;
-    it does not declare G4 passed automatically from the architecture or code.
+    This check rejects missing or structurally ineligible evidence. Effect sizes
+    and intervals are returned for review without an automatic numerical cutoff.
     """
     from .interventions.controls import residual_control_summary
     from .io import read_jsonl
@@ -62,9 +63,9 @@ def verify_g4_positive_control(gate, root, *, expected_test_layers=None):
         raise ValueError("G4 requires eligible residual evidence aligned with the declared K/V test band, excluding layer zero and retaining downstream attention")
     if candidates[0]["test_layers"] != test_layers:
         raise ValueError("G4 evidence test band differs from the selected test band")
-    effect = candidates[0]["effects"].get("natural|changed_accuracy", {})
-    if effect.get("estimate") is None or effect["estimate"] <= 0:
-        raise ValueError("G4 residual positive control did not improve changed-view consequence accuracy over own replay")
+    geometry = {row.get("model_num_hidden_layers") for row in rows}
+    if len(geometry) != 1 or test_layers != list(range(1, next(iter(geometry)))):
+        raise ValueError("G4 primary evidence requires every layer from 1 through the final model layer")
     return candidates[0]
 
 
@@ -113,9 +114,13 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if paid_required:
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
-        test_layers = calibration.get("settings", {}).get("g4_test_layers")
+        settings = calibration.get("settings", {})
+        _validate_frozen_g4_band(settings)
+        test_layers = settings.get("g4_test_layers")
         if test_layers is None:
-            raise ValueError("G4 test band must be declared in frozen calibration settings.g4_test_layers")
+            raise ValueError("G4 pilot evidence band must be declared in frozen calibration settings.g4_test_layers")
+        # This list binds the reviewed pilot evidence, not the confirmatory
+        # architecture. Each model uses the frozen policy with its own geometry.
         verify_g4_positive_control(review["gates"]["G4"], path.parent, expected_test_layers=test_layers)
         paid = review.get("paid_compute", {})
         if not paid.get("approved") or not paid.get("approved_by"):
@@ -143,8 +148,9 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
     if review["calibration"]["frozen"]:
         raise ValueError("Calibration is already frozen; use a new preregistered experiment lineage")
     from .data import assert_calibration_corpus
+    _validate_difficulty_review(settings)
     _validate_frozen_g4_band(settings)
-    assert_calibration_corpus(manifest, acknowledged_heuristic_risks=_heuristic_risk_review(manifest, settings))
+    assert_calibration_corpus(manifest)
     review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest),
                              "manifest_path": str(Path(manifest).resolve()), "settings": settings}
     review["gates"]["G0"] = {"status": "pass", "reviewed_by": reviewer, "rationale": rationale,
@@ -156,33 +162,37 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
 def validate_calibration_manifest(calibration):
     """Old or modified corpora cannot reuse a G0 approval after the generator fix."""
     from .data import assert_calibration_corpus
-    _validate_frozen_g4_band(calibration.get("settings", {}))
     manifest = calibration.get("manifest_path")
     if not manifest or not Path(manifest).is_file():
         raise ValueError("G0 requires a current audited corpus manifest path; recalibrate old lineages")
     if file_digest(manifest) != calibration.get("manifest_sha256"):
         raise ValueError("G0 corpus manifest was modified after calibration")
-    return assert_calibration_corpus(manifest, acknowledged_heuristic_risks=
-                                     _heuristic_risk_review(manifest, calibration.get("settings", {})))
+    _validate_difficulty_review(calibration.get("settings", {}))
+    _validate_frozen_g4_band(calibration.get("settings", {}))
+    return assert_calibration_corpus(manifest)
 
 
-def _heuristic_risk_review(manifest, settings):
-    """Known weak heuristics need a corpus-bound decision, never an implicit pass."""
-    acknowledgement = settings.get("residual_heuristic_review")
-    if acknowledgement is None:
-        return False
-    corpus_hash = json.loads(Path(manifest).read_text()).get("corpus_hash")
-    if (not isinstance(acknowledgement, dict) or acknowledgement.get("accepted") is not True
-            or not corpus_hash or acknowledgement.get("corpus_hash") != corpus_hash
-            or not isinstance(acknowledgement.get("rationale"), str)
-            or not acknowledgement["rationale"].strip()):
-        raise ValueError("G0 residual heuristic review requires accepted=true, the current corpus_hash and a rationale")
-    return True
+def _validate_difficulty_review(settings):
+    """Require measured difficulty and interpretation, never impose a score cutoff."""
+    review = settings.get("difficulty_review")
+    if not isinstance(review, dict):
+        raise ValueError("G0 calibration requires settings.difficulty_review with an estimate, interval and interpretation")
+    estimate, interval = review.get("estimate"), review.get("ci95")
+    if (type(estimate) not in (int, float) or not math.isfinite(estimate) or not 0 <= estimate <= 1
+            or not isinstance(interval, list) or len(interval) != 2
+            or any(type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 1
+                   for value in interval) or interval[0] > interval[1]):
+        raise ValueError("G0 difficulty review needs a finite probability estimate and ordered interval within [0,1]")
+    interpretation = review.get("relation_to_chance_and_ceiling")
+    if not isinstance(interpretation, str) or not interpretation.strip():
+        raise ValueError("G0 difficulty review needs a reviewer interpretation relative to chance and ceiling")
 
 
 def _validate_frozen_g4_band(settings):
+    if settings.get("g4_layer_policy") != G4_LAYER_POLICY:
+        raise ValueError("Frozen calibration requires g4_layer_policy='all_after_embedding_layer' for each model's layers 1 through last")
     layers = settings.get("g4_test_layers")
     if layers is not None and (not isinstance(layers, list) or not layers
             or any(type(layer) is not int or layer < 1 for layer in layers)
-            or layers != list(range(min(layers), max(layers) + 1))):
-        raise ValueError("Frozen G4 test layers must be a sorted contiguous band starting after layer zero")
+            or layers != list(range(1, max(layers) + 1))):
+        raise ValueError("Frozen G4 pilot test layers must include every layer from 1 through the pilot model's final layer")

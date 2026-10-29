@@ -67,6 +67,8 @@ def parser():
         run.add_argument("--arm")
         if command in ("evaluate", "opentom-evaluate"):
             run.add_argument("--reasoning", action="store_true", help="Native reasoning format; otherwise immediate")
+        if command == "opentom-evaluate":
+            run.add_argument("--opentom-protocol", choices=["official", "adapted"], default="official")
         if command == "evaluate":
             run.add_argument("--format", choices=["immediate", "native_answer", "native_reasoning"], default="immediate")
         if command in ("evaluate", "crossed"):
@@ -88,11 +90,11 @@ def parser():
             run.add_argument("--regenerated", nargs="+", help="Frozen source-generated continuations, shared across readers")
             run.add_argument("--comparison-seed", type=int, help="Paired base/trained comparison replicate; inferred from source traces when possible")
         if command == "components":
-            selection = run.add_mutually_exclusive_group(required=True)
-            selection.add_argument("--layers", type=int, nargs="+", help="Explicit zero-based frozen layer mask")
-            selection.add_argument("--all-layers", action="store_true", help="Simultaneous full-depth mask for this model")
+            selection = run.add_mutually_exclusive_group()
+            selection.add_argument("--layers", type=int, nargs="+", help="Secondary diagnostic layer mask; primary defaults to layers 1 through last")
+            selection.add_argument("--all-layers", action="store_true", help="Additional diagnostic including layer 0; primary G4 remains layers 1 through last")
             run.add_argument("--seed", type=int, default=1)
-            run.add_argument("--layer-mode", choices=["joint", "single", "both"], default="joint")
+            run.add_argument("--layer-mode", choices=["joint", "single", "both"], default="both")
             run.add_argument("--residual-control-layers", type=int, nargs="+",
                              help="Additional residual diagnostics; does not declare a G4 test band")
             run.add_argument("--g4-test-layers", type=int, nargs="+",
@@ -106,8 +108,6 @@ def parser():
     edits.add_argument("--input", required=True, help="Evaluation rows with symbolic worlds")
     edits.add_argument("--max-worlds", type=int, help="Pilot defaults to 12; confirmatory uses all candidate worlds")
     edits.add_argument("--stage", choices=["pilot", "confirmatory"], default="pilot")
-    edits.add_argument("--precision-half-width", type=float, default=.10,
-                       help="Preregistered 95%% per-arm story-rate interval target; default .10")
     edits.add_argument("--seed", type=int, default=2026)
     plan = sub.add_parser("plan-edit-generation", help="Freeze editor model, prompt, decoding and audit sample")
     for flag in ("edits", "model", "revision", "output"):
@@ -116,8 +116,6 @@ def parser():
     plan.add_argument("--max-new-tokens", type=int, default=2048)
     plan.add_argument("--audit-sample-size", type=int, default=100)
     plan.add_argument("--audit-seed", type=int, default=2026)
-    plan.add_argument("--max-audit-errors", type=int, default=1)
-    plan.add_argument("--max-error-rate", type=float, default=.05)
     plan.add_argument("--audit-confidence", type=float, default=.95)
     generate_edits = sub.add_parser("generate-edits", help="Generate frozen controls with the preregistered editor")
     for flag in ("edits", "plan", "output"):
@@ -136,10 +134,15 @@ def parser():
     analyze.add_argument("--input", required=True)
     analyze.add_argument("--baseline")
     analyze.add_argument("--output", required=True)
-    analyze.add_argument("--target-accuracy", type=float)
-    analyze.add_argument("--tolerance", type=float, default=.02)
+    analyze.add_argument("--expected-runs", help="JSON list of prespecified arm/dataset/seed run identities for matching")
     for flag in ("base-reader", "trained-reader", "base-source", "trained-source"):
         analyze.add_argument("--" + flag)
+    plot = sub.add_parser("plot", help="Render measured estimates and intervals without decision cutoffs")
+    plot.add_argument("kind", choices=["quadrant", "heuristics"])
+    plot.add_argument("--input", required=True, help="Quadrant manifest JSON or model result JSONL")
+    plot.add_argument("--audit", help="Required for heuristics: shortcut audit JSON")
+    plot.add_argument("--split", choices=["train", "development", "confirmation"])
+    plot.add_argument("--output", required=True, help="PNG, PDF or SVG; a JSON data sidecar is also saved")
     imp = sub.add_parser("opentom-import")
     imp.add_argument("--input", required=True)
     imp.add_argument("--output", required=True)
@@ -198,7 +201,7 @@ def main(argv=None):
         from .traces import prepare_edit_manifest
         write_json(args.output, prepare_edit_manifest([r for p in args.traces for r in read_jsonl(p)],
                     read_jsonl(args.input), max_worlds=args.max_worlds, seed=args.seed,
-                    stage=args.stage, half_width=args.precision_half_width))
+                    stage=args.stage))
     elif command == "plan-edit-generation":
         from .edit_generation import prepare_generation_plan
         if Path(args.output).exists():
@@ -206,7 +209,6 @@ def main(argv=None):
         write_json(args.output, prepare_generation_plan(_json(args.edits), model_id=args.model,
                      revision=args.revision, seed=args.seed, max_new_tokens=args.max_new_tokens,
                      audit_sample_size=args.audit_sample_size, audit_seed=args.audit_seed,
-                     max_audit_errors=args.max_audit_errors, max_error_rate=args.max_error_rate,
                      audit_confidence=args.audit_confidence))
     elif command == "generate-edits":
         from .edit_generation import generate_edit_controls, _validate_plan
@@ -239,6 +241,16 @@ def main(argv=None):
     elif command == "verify-edit-audit":
         from .edit_generation import validate_batch_audit
         write_json(args.output, validate_batch_audit(_json(args.edits), _json(args.audit)))
+    elif command == "plot":
+        from .plotting import (load_quadrant_data, plot_quadrant,
+                               accuracy_reference_data, plot_accuracy_references)
+        if args.kind == "quadrant":
+            plot_quadrant(load_quadrant_data(args.input), args.output)
+        else:
+            if not args.audit:
+                raise ValueError("Heuristic reference plots require --audit")
+            plot_accuracy_references(accuracy_reference_data(read_jsonl(args.input), _json(args.audit),
+                                      split=args.split), args.output)
     elif command == "opentom-import":
         from .opentom import import_opentom
         import_opentom(args.input, args.output, args.source_url)
@@ -264,9 +276,7 @@ def main(argv=None):
             from .opentom import summarize_opentom
             result = summarize_opentom(rows)
         else:
-            if args.target_accuracy is None:
-                raise ValueError("--target-accuracy required for matching")
-            result = analysis.match_checkpoints(rows, args.target_accuracy, args.tolerance)
+            result = analysis.match_checkpoints(rows, expected_runs=_json(args.expected_runs) if args.expected_runs else None)
         write_json(args.output, result)
     else:
         if args.adapter and args.training_seed is None:
@@ -307,7 +317,8 @@ def main(argv=None):
                                         edit_audit=_json(args.edit_audit) if args.edit_audit else None)
         elif command == "components":
             from .interventions import Site, run_component_test
-            layers = list(range(backend.model.config.num_hidden_layers)) if args.all_layers else args.layers
+            primary_layers = list(range(1, backend.model.config.num_hidden_layers))
+            layers = list(range(backend.model.config.num_hidden_layers)) if args.all_layers else (args.layers or primary_layers)
             sites = [Site(layer, component) for layer in layers for component in ("k", "v", "residual")]
             donor_backend = None
             if args.donor_model:
@@ -315,10 +326,10 @@ def main(argv=None):
                 donor_backend = HFBackend(args.donor_model, args.donor_adapter, device=args.device, revision=args.donor_revision)
             results = run_component_test(backend, rows, sites, seed=args.seed,
                          layer_mode=args.layer_mode, donor_backend=donor_backend,
-                         residual_control_layers=args.residual_control_layers, g4_test_layers=args.g4_test_layers)
+                         residual_control_layers=args.residual_control_layers, g4_test_layers=args.g4_test_layers or (None if donor_backend else primary_layers))
         elif command == "opentom-evaluate":
             from .opentom import evaluate_opentom
-            results = evaluate_opentom(backend, rows, args.reasoning)
+            results = evaluate_opentom(backend, rows, args.reasoning, protocol=args.opentom_protocol)
         else:
             raise ValueError(command)
         if command != "regenerate-traces":

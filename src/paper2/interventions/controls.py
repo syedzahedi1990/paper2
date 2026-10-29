@@ -102,6 +102,9 @@ def residual_control_summary(rows):
         candidate = {"checkpoint_id": checkpoint, "mask_id": mask, "layers": group[0].get("layers", []),
                      "test_layers": group[0].get("g4_test_layers"),
                      "eligible": not reasons, "ineligible_reasons": sorted(reasons), "effects": {}}
+        geometry = group[0].get("model_num_hidden_layers")
+        candidate["primary_design_compatible"] = (type(geometry) is int and
+            candidate["layers"] == list(range(1, geometry)))
         if reasons:
             result.append(candidate)
             continue
@@ -148,4 +151,4 @@ def residual_control_summary(rows):
         result.append(candidate)
     return {"candidates": result, "eligible_masks": sorted({r["mask_id"] for r in result if r["eligible"]}),
             "empirical_gate_passed": False,
-            "review_required": "Review positive effects, intact views, flat nulls and useful story-level precision."}
+            "review_required": "Structural candidates do not pass G4. The primary design uses every layer from 1 through the final layer; review measured effects and intervals, intact views and nulls without an automatic effect-size cutoff."}

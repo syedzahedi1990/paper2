@@ -100,10 +100,10 @@ class StubBackend:
 def test_real_evaluation_prompts_show_options_without_gold_conditioning(kind, answer):
     row = record(kind, answer)
     backend = StubBackend([answer, answer])
-    result = next(evaluate_opentom(backend, [row]))
+    result = next(evaluate_opentom(backend, [row], protocol="adapted"))
     changed = copy.deepcopy(row)
     changed["answer_text"] = next(option for option in row["answer_options"] if option.lower() != answer.lower())
-    next(evaluate_opentom(backend, [changed]))
+    next(evaluate_opentom(backend, [changed], protocol="adapted"))
     assert backend.prompts[0] == backend.prompts[1]
     assert all(repr(option) in backend.prompts[0] for option in row["answer_options"])
     assert result["correct"] and result["scoring_protocol"] == SCORING_PROTOCOL
@@ -120,7 +120,7 @@ def test_reader_rejects_answer_options_not_derived_from_question_and_plot():
 
 def test_reasoning_is_scored_from_final_answer_and_missing_delimiter_is_visible():
     backend = StubBackend(["The character saw the move.", " basket"])
-    result = next(evaluate_opentom(backend, [record()], reasoning=True))
+    result = next(evaluate_opentom(backend, [record()], reasoning=True, protocol="adapted"))
     assert result["correct"] and result["forced_delimiter"]
     assert result["trace"] == "The character saw the move."
     assert backend.prompts[-1].endswith("\nAnswer:")
@@ -150,3 +150,53 @@ def test_summary_separates_subtypes_macro_f1_and_invalid_output_denominators():
     assert subtype["invalid_predictions"] == 1
     assert subtype["upstream_diagnostic"]["included"] == 2
     assert subtype["upstream_diagnostic"]["accuracy_excluding_invalid"] == .5
+
+
+def test_pinned_official_prompt_and_lexical_scorer_parity():
+    from pathlib import Path
+    from paper2.opentom import OPENTOM_REVISION, official_prompt, upstream_score
+    fixture = json.loads((Path(__file__).parent / 'fixtures/opentom_official_parity.json').read_text())
+    assert fixture['revision'] == OPENTOM_REVISION
+    for case in fixture['cases']:
+        row = record(case['kind'], case['answer'])
+        row.update(story=case['story'], question=case['question'])
+        assert official_prompt(row, case['reasoning']) == case['official_prompt']
+        for example in case['scores']:
+            actual = upstream_score(example['prediction'], row)
+            assert actual['upstream_prediction_label'] == example['prediction_label']
+            assert actual['upstream_target_label'] == example['target_label']
+
+
+def test_default_official_run_has_no_paper2_answer_injection_and_parses_upstream_cot():
+    from paper2.opentom import OFFICIAL_PROTOCOL, OFFICIAL_SYSTEM, official_prompt
+    backend = StubBackend(['The character saw the move.\nTherefore, the basket.'])
+    result = next(evaluate_opentom(backend, [record()], reasoning=True))
+    assert backend.prompts == [OFFICIAL_SYSTEM + '\n' + official_prompt(record(), True)]
+    assert len(backend.prompts) == 1 and not backend.prompts[0].endswith('Answer:')
+    assert result['prediction_text'] == 'Therefore, the basket.'
+    assert result['correct'] and not result['forced_delimiter']
+    assert result['evaluation_protocol'] == OFFICIAL_PROTOCOL and result['primary_metric'] == 'macro_f1'
+    assert result['raw_generation'].startswith('The character')
+
+
+def test_official_primary_f1_retains_upstream_exclusions_and_story_intervals():
+    backend = StubBackend(['Yes', 'Yes', '?'])
+    rows = [record('coarse_location', answer) for answer in ('Yes', 'No', 'No')]
+    results = list(evaluate_opentom(backend, rows))
+    report = summarize_opentom(results, samples=100)
+    subtype = report['by_subtype']['location-fo|coarse_location']
+    assert subtype['macro_f1'] == pytest.approx(1 / 3)
+    assert subtype['accuracy'] == .5 and subtype['accuracy_full_denominator'] == pytest.approx(1 / 3)
+    assert subtype['included'] == 2 and subtype['excluded'] == 1
+    assert subtype['bootstrap']['unit'] == 'whole_story' and subtype['bootstrap']['stories'] == 1
+    assert subtype['macro_f1_ci95'] == pytest.approx([1 / 3, 1 / 3])
+
+
+def test_official_and_adapted_results_and_readers_never_pool():
+    row = record('coarse_location', 'No')
+    primary = list(evaluate_opentom(StubBackend(['No']), [row]))
+    secondary = list(evaluate_opentom(StubBackend(['No']), [row], protocol='adapted'))
+    other = {**primary[0], 'reader': 'other-checkpoint'}
+    result = summarize_opentom(primary + secondary + [other], samples=20)
+    assert len(result['by_run']) == 3
+    assert any(value.get('role') == 'secondary_adapted_check' for value in result['by_run'].values())

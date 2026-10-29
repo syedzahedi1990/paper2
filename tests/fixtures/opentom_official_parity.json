@@ -1,0 +1,266 @@
+{
+  "revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5",
+  "source": "https://github.com/seacowx/OpenToM",
+  "license": "CC BY-NC 4.0",
+  "sha256": {
+    "src/utils/build_prompt.py": "b2018c2f625f8764a29ba1839b635b8c59cddf6ac8498a6adc931191feb984ae",
+    "src/evaluate/opentom_evaluator.py": "f9ce5fb04e4b79ed109a37a696e2f104c09a272c5ef48cea4066cf58a0c2d819",
+    "src/prompts/chatgpt_opentom_prompts/chatgpt_location_cg.txt": "9195ddc6451b35a6e0ca10056eda1ac7268af4918c42ac604f50436ae3b2048f",
+    "src/prompts/chatgpt_opentom_prompts/chatgpt_location_fg.txt": "0014f04bf488e88b61b3ead6510f8ee9d79894d477a88c3397e47f46298eefab",
+    "src/prompts/chatgpt_opentom_prompts/chatgpt_multihop_fullness.txt": "0014f04bf488e88b61b3ead6510f8ee9d79894d477a88c3397e47f46298eefab",
+    "src/prompts/chatgpt_opentom_prompts/chatgpt_multihop_accessibility.txt": "0014f04bf488e88b61b3ead6510f8ee9d79894d477a88c3397e47f46298eefab",
+    "src/prompts/chatgpt_opentom_prompts/chatgpt_attitude.txt": "9d5ae77caaf0bc4bdd71f14cffb70a66bbcc8cc5cb9ae772a5b4022632314d01"
+  },
+  "cases": [
+    {
+      "kind": "fine_location",
+      "question": "Where does Alice locate the cup?",
+      "answer": "the basket",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": false,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: Where does Alice locate the cup? Answer the question without any explanation.",
+      "scores": [
+        {
+          "prediction": "the basket",
+          "target_label": 2,
+          "prediction_label": 2
+        },
+        {
+          "prediction": "box or basket",
+          "target_label": 2,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "?",
+          "target_label": 2,
+          "prediction_label": 3
+        }
+      ]
+    },
+    {
+      "kind": "fine_location",
+      "question": "Where does Alice locate the cup?",
+      "answer": "the basket",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": true,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: Where does Alice locate the cup? Reason step by step before answering. Write the answer in the end.",
+      "scores": [
+        {
+          "prediction": "the basket",
+          "target_label": 2,
+          "prediction_label": 2
+        },
+        {
+          "prediction": "box or basket",
+          "target_label": 2,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "?",
+          "target_label": 2,
+          "prediction_label": 3
+        }
+      ]
+    },
+    {
+      "kind": "coarse_location",
+      "question": "Does Alice think the cup is in its initial location?",
+      "answer": "Yes",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": false,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: Does Alice think the cup is in its initial location? Answer the question with \"Yes\" or \"No\". Do not give any explanation.",
+      "scores": [
+        {
+          "prediction": "Yes",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "No",
+          "target_label": 1,
+          "prediction_label": 0
+        },
+        {
+          "prediction": "unknown",
+          "target_label": 1,
+          "prediction_label": 0
+        }
+      ]
+    },
+    {
+      "kind": "coarse_location",
+      "question": "Does Alice think the cup is in its initial location?",
+      "answer": "Yes",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": true,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: Does Alice think the cup is in its initial location? Answer the question with \"Yes\" or \"No\". Reason step by step before answering. Write the answer in the end.",
+      "scores": [
+        {
+          "prediction": "Yes",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "No",
+          "target_label": 1,
+          "prediction_label": 0
+        },
+        {
+          "prediction": "unknown",
+          "target_label": 1,
+          "prediction_label": 0
+        }
+      ]
+    },
+    {
+      "kind": "fullness",
+      "question": "How does Alice think the fullness of the box changed?",
+      "answer": "less full",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": false,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: How does Alice think the fullness of the box changed? Answer with \"more full\", \"equally full\", or \"less full\". Answer the question without any explanation.",
+      "scores": [
+        {
+          "prediction": "emptier",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "equally full",
+          "target_label": 1,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "more full or less full",
+          "target_label": 1,
+          "prediction_label": 1
+        }
+      ]
+    },
+    {
+      "kind": "fullness",
+      "question": "How does Alice think the fullness of the box changed?",
+      "answer": "less full",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": true,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: How does Alice think the fullness of the box changed? Answer with \"more full\", \"equally full\", or \"less full\". Reason step by step before answering. Write the answer in the end.",
+      "scores": [
+        {
+          "prediction": "emptier",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "equally full",
+          "target_label": 1,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "more full or less full",
+          "target_label": 1,
+          "prediction_label": 1
+        }
+      ]
+    },
+    {
+      "kind": "accessibility",
+      "question": "How does Alice think the accessibility of the cup changed?",
+      "answer": "more accessible",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": false,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: How does Alice think the accessibility of the cup changed? Answer with \"more accessible\", \"equally accessible\", or \"less accessible\". Answer the question without any explanation.",
+      "scores": [
+        {
+          "prediction": "less accessible",
+          "target_label": 1,
+          "prediction_label": 2
+        },
+        {
+          "prediction": "more accessible",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "?",
+          "target_label": 1,
+          "prediction_label": -1
+        }
+      ]
+    },
+    {
+      "kind": "accessibility",
+      "question": "How does Alice think the accessibility of the cup changed?",
+      "answer": "more accessible",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": true,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: How does Alice think the accessibility of the cup changed? Answer with \"more accessible\", \"equally accessible\", or \"less accessible\". Reason step by step before answering. Write the answer in the end.",
+      "scores": [
+        {
+          "prediction": "less accessible",
+          "target_label": 1,
+          "prediction_label": 2
+        },
+        {
+          "prediction": "more accessible",
+          "target_label": 1,
+          "prediction_label": 1
+        },
+        {
+          "prediction": "?",
+          "target_label": 1,
+          "prediction_label": -1
+        }
+      ]
+    },
+    {
+      "kind": "attitude",
+      "question": "As Alice, what is your attitude towards Bob\u2019s action?",
+      "answer": "neutral",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": false,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: As Alice, what is your attitude towards Bob\u2019s action, assuming that you observed the action? Answer with \"positive\", \"neutral\", or \"negative\". Answer without any explanation.",
+      "scores": [
+        {
+          "prediction": "B",
+          "target_label": 3,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "positive or negative",
+          "target_label": 3,
+          "prediction_label": -1
+        },
+        {
+          "prediction": "neutral",
+          "target_label": 3,
+          "prediction_label": 3
+        }
+      ]
+    },
+    {
+      "kind": "attitude",
+      "question": "As Alice, what is your attitude towards Bob\u2019s action?",
+      "answer": "neutral",
+      "story": "Alice likes the cup. Bob moves it from the box to the basket. Alice watches.",
+      "reasoning": true,
+      "official_prompt": "Read and comprehend the following short story. Then, answer the question that follows.\n\nAlice likes the cup. Bob moves it from the box to the basket. Alice watches.\n\nQuestion: As Alice, what is your attitude towards Bob\u2019s action, assuming that you observed the action? Answer with \"positive\", \"neutral\", or \"negative\". Reason step by step before answering. Write the answer in the end.",
+      "scores": [
+        {
+          "prediction": "B",
+          "target_label": 3,
+          "prediction_label": 3
+        },
+        {
+          "prediction": "positive or negative",
+          "target_label": 3,
+          "prediction_label": -1
+        },
+        {
+          "prediction": "neutral",
+          "target_label": 3,
+          "prediction_label": 3
+        }
+      ]
+    }
+  ]
+}

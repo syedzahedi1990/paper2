@@ -2,7 +2,7 @@
 
 A rule that returns several candidates is scored as uniform choice among those
 candidates (its exact expected accuracy), not an optimistically selected answer.
-The simultaneous bounds are screening thresholds, not hypothesis-test results.
+Reported intervals describe uncertainty; no heuristic score decides a gate.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 
 from .world import AGENTS, LOCATIONS, StoryWorld, ordinary_target
 
-AUDIT_VERSION = "paper2.shortcuts.v4"
+AUDIT_VERSION = "paper2.shortcuts.v5"
 RELATION_WEIGHTS = {"both": 1, "outer_only": 5, "inner_only": 5, "neither": 25}
 
 
@@ -33,9 +33,25 @@ def _mode_candidates(locations: Iterable[str]) -> set[str]:
     return {location for location, count in counts.items() if count == maximum}
 
 
-def _residual_heuristics(cell: list[StoryWorld], minimum_cell_size: int,
-                         familywise_alpha: float, position_count: int) -> dict[str, Any]:
-    """Measure remaining usable rules without relabelling their violations as passes."""
+def _score_summary(observations: list[float], reference: float, confidence: float) -> dict[str, Any]:
+    """Pointwise bounded-score interval, never an acceptance threshold.
+
+    The Hoeffding interval assumes independent story observations. Exact quota
+    totals are design checks, not estimates inferred from these intervals.
+    """
+    n = len(observations)
+    score = sum(observations) / n
+    radius = math.sqrt(math.log(2 / (1 - confidence)) / (2 * n))
+    return {"n": n, "score": score, "estimate": score,
+            "ci95": [max(0., score - radius), min(1., score + radius)] if confidence == .95 else None,
+            "interval": [max(0., score - radius), min(1., score + radius)],
+            "confidence": confidence, "interval_method": "pointwise_hoeffding_bounded_story_score",
+            "reference_expectation": reference, "difference_from_reference": score - reference}
+
+
+def _residual_heuristics(cell: list[StoryWorld], position_count: int,
+                         confidence: float) -> dict[str, Any]:
+    """Describe positional, frequency and observation heuristics without screening."""
     scores: dict[str, list[float]] = defaultdict(list)
     ties: Counter[str] = Counter()
     missing: Counter[str] = Counter()
@@ -71,39 +87,22 @@ def _residual_heuristics(cell: list[StoryWorld], minimum_cell_size: int,
         else:
             scores["last_both_observed"].append(joint_score)
             missing["last_both_observed"] += not jointly_observed
-    # Four possible strata, all observed event positions and four additional
-    # rules. Keep at least the existing controls' 52-comparison bound.
-    comparisons = max(52, 4 * (position_count + 4))
     metrics = {}
     for rule, observations in sorted(scores.items()):
-        n = len(observations)
-        score = sum(observations) / n
-        tolerance = math.sqrt(math.log(2 * comparisons / familywise_alpha) / (2 * n))
-        deviation = abs(score - 1 / len(LOCATIONS))
-        sufficient = n >= minimum_cell_size
-        metrics[rule] = {"n": n, "score": score, "null_expectation": 1 / len(LOCATIONS),
-                         "absolute_deviation": deviation, "maximum_deviation": tolerance,
-                         "sufficient": sufficient, "passed": sufficient and deviation <= tolerance,
-                         "requires_review": sufficient and deviation > tolerance,
+        metrics[rule] = {**_score_summary(observations, 1 / len(LOCATIONS), confidence),
                          "tie_worlds": ties[rule], "initial_fallback_worlds": missing[rule]}
     semantic_baselines = {}
     if semantic_scores:
         semantic_baselines["last_both_observed"] = {
-            "n": len(semantic_scores), "score": sum(semantic_scores) / len(semantic_scores),
-            "expected_accuracy": 1.0,
+            **_score_summary(semantic_scores, 1., confidence),
             "interpretation": "Exact intended depth-two update rule; not a chance-level shortcut control",
         }
-    failures = [rule for rule, metric in metrics.items() if metric["requires_review"]]
-    return {"metrics": metrics, "semantic_baselines": semantic_baselines,
-            "all_near_chance": bool(metrics) and all(metric["passed"] for metric in metrics.values()),
-            "requires_review": bool(failures), "flagged_rules": failures,
-            "simultaneous_comparisons": comparisons}
+    return {"metrics": metrics, "semantic_baselines": semantic_baselines}
 
 
 def audit_shortcuts(worlds: Iterable[StoryWorld], *,
                     cue_rows: Iterable[Mapping[str, Any]] = (),
-                    minimum_cell_size: int = 24,
-                    familywise_alpha: float = 0.01,
+                    confidence: float = .95,
                     expected_depths: Iterable[int] | None = None,
                     require_cues: bool = False,
                     require_relation_quotas: bool = False,
@@ -116,12 +115,12 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
     of disagreements. Candidate-exclusion accuracies test usable answer rules.
     Only clean/independent cues should be near chance; planted cue conditions
     are reported against their intended rates separately by the corpus manifest.
-    Remaining heuristic failures are reported separately from required controls
-    and make `passed` false. An explicit G0 review may accept these documented
-    limitations, but cannot waive required-control or coverage failures.
+    Every score and interval is descriptive. Only exact declared design quotas
+    and required coverage receive an integrity pass/fail result. Scientific G0
+    suitability remains a named reviewer decision informed by all measurements.
     """
-    if minimum_cell_size < 1 or not 0 < familywise_alpha < 1:
-        raise ValueError("Invalid shortcut-audit threshold")
+    if type(confidence) not in (int, float) or not 0 < confidence < 1:
+        raise ValueError("Shortcut interval confidence must be between zero and one")
     worlds = list(worlds)
     cues: dict[str, list[str]] = defaultdict(list)
     for row in cue_rows:
@@ -140,9 +139,6 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
     unexpected_strata = sorted(set(grouped) - expected_strata)
     missing_cues = sum(world.world_id not in cues for world in worlds)
     coverage_passed = not missing_strata and not unexpected_strata and (not require_cues or not missing_cues)
-    # At most 4 strata x 13 metrics. A fixed denominator prevents an omitted
-    # stratum or unavailable cue from silently weakening the threshold.
-    comparisons = 52
     position_count = max((sum(event.object == world.focal_object for event in world.events)
                           for world in worlds), default=0)
     strata = {}
@@ -180,30 +176,8 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
                     candidates = set(LOCATIONS) - excluded
                     values[rule].append(float(target in candidates) / len(candidates))
                     expectations[rule] = 1 / 6
-        metrics = {}
-        for rule, observations in sorted(values.items()):
-            count = len(observations)
-            score = sum(observations) / count
-            tolerance = math.sqrt(math.log(2 * comparisons / familywise_alpha) / (2 * count))
-            if require_relation_quotas and rule in ("equal_outer", "equal_inner", "equal_both", "different_from_both"):
-                # Each joint quota differs from its ideal real count by <1;
-                # either marginal sums two such cells. This exact finite-design
-                # bound replaces a loose sampling bound for planned relations.
-                tolerance = min(tolerance, (2 if rule in ("equal_outer", "equal_inner") else 1) / count)
-            if require_clean_cue_quota and rule == "clean_cue":
-                tolerance = min(tolerance, 1 / count)
-            sufficient = count >= minimum_cell_size
-            # Wide held-out confidence bounds must never admit a deterministic
-            # relation. Do not require equal_both>0: its six-label null is only
-            # 1/36, so zero cases in a 30-world cell is ordinary sampling noise.
-            needs_both_signs = rule in ("equal_outer", "equal_inner", "different_from_both")
-            nondegenerate = 0 < score < 1 if needs_both_signs else True
-            metrics[rule] = {"n": count, "score": score, "null_expectation": expectations[rule],
-                             "absolute_deviation": abs(score - expectations[rule]),
-                             "maximum_deviation": tolerance,
-                             "sufficient": sufficient, "requires_both_relation_outcomes": needs_both_signs,
-                             "nondegenerate": nondegenerate,
-                             "passed": sufficient and nondegenerate and abs(score - expectations[rule]) <= tolerance}
+        metrics = {rule: _score_summary(observations, expectations[rule], confidence)
+                   for rule, observations in sorted(values.items())}
         planned = relation_quota(len(cell)) if key.startswith("depth2") else None
         observed = {relation: relation_counts[relation] for relation in RELATION_WEIGHTS} if planned is not None else None
         quota_passed = planned is None or not require_relation_quotas or observed == planned
@@ -211,28 +185,24 @@ def audit_shortcuts(worlds: Iterable[StoryWorld], *,
         clean_observed = sum(values.get("clean_cue", []))
         clean_passed = not require_clean_cue_quota or (len(values.get("clean_cue", [])) == len(cell)
                                                        and clean_observed == clean_planned)
-        required_passed = quota_passed and clean_passed and all(metric["passed"] for metric in metrics.values())
-        residual = _residual_heuristics(cell, minimum_cell_size, familywise_alpha, position_count)
-        strata[key] = {"n": len(cell), "passed": required_passed and residual["all_near_chance"],
-                       "required_controls_passed": required_passed, "residual_heuristics": residual,
+        integrity_passed = quota_passed and clean_passed
+        residual = _residual_heuristics(cell, position_count, confidence)
+        strata[key] = {"n": len(cell), "world_ids": sorted(world.world_id for world in cell),
+                       "integrity_passed": integrity_passed,
+                       "residual_heuristics": residual,
                        "clean_cue_quota": {"required": require_clean_cue_quota, "planned_correct": clean_planned,
                                            "observed_correct": clean_observed, "passed": clean_passed},
                        "metrics": metrics, "relation_quota": {"required": require_relation_quotas and planned is not None,
                                                                "planned": planned, "observed": observed,
                                                                "passed": quota_passed}}
-    required_passed = bool(strata) and coverage_passed and all(cell["required_controls_passed"] for cell in strata.values())
-    residual_passed = bool(strata) and all(cell["residual_heuristics"]["all_near_chance"] for cell in strata.values())
-    return {"audit_version": AUDIT_VERSION, "passed": required_passed and residual_passed,
-            "required_controls_passed": required_passed,
-            "all_shortcuts_near_chance": required_passed and residual_passed,
-            "requires_heuristic_review": any(cell["residual_heuristics"]["requires_review"] for cell in strata.values()),
-            "gate_implication": "Required controls cannot be waived; residual failures require corpus-bound G0 review and disclosure",
+    integrity_passed = bool(strata) and coverage_passed and all(cell["integrity_passed"] for cell in strata.values())
+    return {"audit_version": AUDIT_VERSION, "integrity_passed": integrity_passed,
+            "scientific_decision": "Requires named review of estimates, intervals, difficulty and heuristic use; no automatic accuracy cutoffs",
             "coverage": {"expected_strata": sorted(expected_strata), "missing_strata": missing_strata,
                          "unexpected_strata": unexpected_strata, "cues_required": require_cues,
                          "worlds_missing_clean_cue": missing_cues, "passed": coverage_passed},
-            "worlds": len(worlds), "minimum_cell_size": minimum_cell_size,
-            "familywise_alpha": familywise_alpha, "simultaneous_comparisons": comparisons,
-            "threshold": "Two-sided Hoeffding bounds; required joint relation and heldout clean-cue quotas must match exactly",
+            "worlds": len(worlds), "confidence": confidence,
+            "interval_interpretation": "Pointwise bounded-score intervals assuming independent stories; not simultaneous screening bounds. Exact planned quotas are separate integrity checks.",
             "candidate_rule_scoring": "Uniform random selection from retained candidates; exact expected accuracy",
             "residual_rule_definitions": {
                 "event_position_N": "Nth focal-object event (one-based); use focal initial location if absent",

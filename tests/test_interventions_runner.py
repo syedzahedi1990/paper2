@@ -202,7 +202,7 @@ def test_component_cli_exposes_secondary_donor_and_preserves_joint_mask(tmp_path
     source.write_text(json.dumps(pair) + '\n')
     output = tmp_path / 'components.jsonl'
     assert cli.main(['components', '--model', 'tiny-recipient', '--donor-model', 'tiny-donor',
-                     '--input', str(source), '--output', str(output), '--layers', '0', '1']) == 0
+                     '--input', str(source), '--output', str(output), '--layers', '0', '1', '--layer-mode', 'joint']) == 0
     assert requests == [('tiny-donor', None)]
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert all(row['analysis'] == 'secondary_cross_model' for row in rows)
@@ -220,3 +220,18 @@ def test_single_layer_diagnostics_are_not_automatically_g4_controls():
     early = [row for row in rows if row["component"] == "residual" and row["layers"] == [1]]
     assert early and not any(row["g4_control_eligible"] for row in early)
     assert all(row["g4_control_reason"] == "residual_band_does_not_match_preregistered_test_band" for row in early)
+
+
+def test_cli_default_runs_primary_all_after_layer_zero_and_descriptive_layers(tmp_path, monkeypatch):
+    import paper2.cli as cli
+    pair = matched_pair(generate_world(random.Random(17), distractor_events=0))
+    backend = tiny_backend(pair, num_layers=3)
+    monkeypatch.setattr(cli, "_backend", lambda args: backend)
+    source, output = tmp_path / "pairs.jsonl", tmp_path / "components.jsonl"
+    source.write_text(json.dumps(pair) + "\n")
+    assert cli.main(["components", "--input", str(source), "--output", str(output)]) == 0
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    assert {tuple(row["layers"]) for row in rows if row["receipt"]} == {(1,), (2,), (1, 2)}
+    primary = [row for row in rows if row["layers"] == [1, 2] and row["receipt"]]
+    assert {row["component"] for row in primary} == {"k", "v", "residual"}
+    assert all(row["g4_test_layers"] == [1, 2] for row in rows)

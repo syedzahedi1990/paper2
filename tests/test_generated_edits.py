@@ -85,7 +85,6 @@ def approved_audit(batch):
     for item in audit["items"]:
         item["reviewed_by"] = "Human reviewer"
         item["checks"] = {check: True for check in item["checks"]}
-    audit["accepted"], audit["accepted_by"] = True, "Human investigator"
     return audit
 
 
@@ -127,7 +126,7 @@ def test_audit_sample_is_fixed_before_generation_and_covers_every_checkpoint():
     assert len(plan["audit"]["uniform_artifact_ids"]) == 2
     assert len({item["source"] for item in audit["items"]}) == 12
     assert audit["sample_size"] <= 14  # Global sample plus missing sources, not 60 per source.
-    assert "Uniform random audit seed" in plan["audit"]["design_detection"]["assumptions"]
+    assert "Uniform random seed" in plan["audit"]["sampling_assumptions"]
     assert prepare_batch_audit(batch) == audit
 
 
@@ -135,7 +134,7 @@ def test_batch_acceptance_binds_every_contract_without_individual_approval():
     traces, manifest, plan = fixture()
     batch = generate_edit_controls(Editor(), traces, manifest, plan)
     approval = validate_batch_audit(batch, approved_audit(batch))
-    assert approval["approved_contract_hashes"] == {
+    assert approval["bound_contract_hashes"] == {
         contract["artifact_id"]: digest(contract) for contract in batch["edits"]}
     assert approval["sample_size"] <= approval["population_size"]
     assert all(contract["approved"] is False for contract in batch["edits"])
@@ -146,22 +145,17 @@ def test_batch_acceptance_binds_every_contract_without_individual_approval():
         validate_batch_audit(batch, prepare_batch_audit(batch))
 
 
-@pytest.mark.parametrize("mutation", ["failed_check", "missing_check", "missing_item", "changed_sample",
-                                       "no_acceptance", "no_reviewer"])
-def test_human_audit_rejects_failed_missing_or_substituted_checks(mutation):
+@pytest.mark.parametrize("mutation", ["missing_check", "missing_item", "changed_sample", "no_reviewer"])
+def test_human_audit_rejects_missing_or_substituted_checks(mutation):
     traces, manifest, plan = fixture(worlds=5)
     batch = generate_edit_controls(Editor(), traces, manifest, plan)
     audit = approved_audit(batch)
-    if mutation == "failed_check":
-        audit["items"][0]["checks"][CHECKS[0]] = False
-    elif mutation == "missing_check":
+    if mutation == "missing_check":
         del audit["items"][0]["checks"][CHECKS[0]]
     elif mutation == "missing_item":
         audit["items"].pop()
     elif mutation == "changed_sample":
         audit["items"][0]["artifact_id"] = "different"
-    elif mutation == "no_acceptance":
-        audit["accepted"] = False
     else:
         audit["items"][0]["reviewed_by"] = " "
     with pytest.raises(ValueError):
@@ -197,7 +191,7 @@ def test_invalid_model_outputs_are_retained_as_operational_failures_without_usab
     assert len(batch["edits"]) == len(manifest["edits"])
     certificate = validate_batch_audit(batch, approved_audit(batch))
     assert certificate["status_counts"] == {"error": 1}
-    assert certificate["approved_contract_hashes"] == {}
+    assert certificate["bound_contract_hashes"] == {}
     assert certificate["failed_contract_hashes"] == {contract["artifact_id"]: digest(contract)}
 
 
@@ -336,7 +330,7 @@ def test_scientific_not_editable_outcomes_remain_in_batch_and_audit(reason):
     assert len(validate_generated_batch(batch)) == 4
     assert all(contract["generation_status"] == "not_editable" for contract in batch["edits"])
     certificate = validate_batch_audit(batch, approved_audit(batch))
-    assert certificate["approved_contract_hashes"] == {}
+    assert certificate["bound_contract_hashes"] == {}
     assert len(certificate["not_editable_contract_hashes"]) == 4
     assert len(certificate["effective_contracts"]) == 4
     assert certificate["status_counts"] == {"not_editable": 4}
@@ -415,10 +409,10 @@ def test_small_audit_failure_can_be_corrected_without_erasing_original_or_resamp
     assert corrected["generation"] == original["generation"]
     assert corrected["human_correction"]["original_contract_sha256"] == digest(original)
     assert corrected["paraphrase"]["text"] != original["paraphrase"]["text"]
-    assert certificate["approved_contract_hashes"][item["artifact_id"]] == digest(corrected)
+    assert certificate["bound_contract_hashes"][item["artifact_id"]] == digest(corrected)
     assert certificate["audit_error_rate"]["failure_count"] == 1
     assert certificate["audit_error_rate"]["one_sided_upper_rate"] == .025
-    assert certificate["audit_error_rate"]["original_ready_one_sided_upper_rate"] == .025
+    assert certificate["audit_error_rate"]["original_ready"]["one_sided_upper_rate"] == .025
     assert corrected["approved"] is False
     trace = next(t for t in traces if t["artifact_id"] == item["artifact_id"])
     validate_edit(trace, corrected, batch_review=certificate)
@@ -434,20 +428,22 @@ def test_corrected_editability_classification_still_counts_as_original_failure()
     _, item = corrected_sample(audit, batch, to_not_editable=True)
     certificate = validate_batch_audit(batch, audit)
     assert certificate["status_counts"] == {"ready": 39, "not_editable": 1}
-    assert certificate["audit_error_rate"]["original_ready_population"] == 40
+    assert certificate["audit_error_rate"]["original_ready"]["population_size"] == 40
     assert certificate["audit_error_rate"]["failure_count"] == 1
     assert item["artifact_id"] in certificate["not_editable_contract_hashes"]
-    assert item["artifact_id"] not in certificate["approved_contract_hashes"]
+    assert item["artifact_id"] not in certificate["bound_contract_hashes"]
 
 
-def test_second_sample_failure_exceeds_fixed_cap_even_after_successful_corrections():
+def test_multiple_sample_failures_are_reported_without_a_numeric_cap():
     traces, manifest, plan = fixture(worlds=20, sources=2)
     batch = generate_edit_controls(Editor(), traces, manifest, plan)
     audit = approved_audit(batch)
     corrected_sample(audit, batch, item_index=0)
     corrected_sample(audit, batch, item_index=1)
-    with pytest.raises(ValueError, match="preregistered count"):
-        validate_batch_audit(batch, audit)
+    certificate = validate_batch_audit(batch, audit)
+    assert certificate["audit_complete"]
+    assert certificate["audit_error_rate"]["flaw_rate"] == .05
+    assert certificate["audit_error_rate"]["ci95"] == [.05, .05]
 
 
 def manual_controls(contract):
@@ -492,7 +488,7 @@ def test_human_can_repair_sampled_generation_error_and_original_operational_rate
     assert certificate["original_status_counts"] == {"error": 4}
     assert certificate["status_counts"] == {"ready": 1, "error": 3}
     assert certificate["audit_error_rate"]["failure_count"] == 0
-    assert certificate["audit_error_rate"]["original_ready_one_sided_upper_rate"] is None
+    assert certificate["audit_error_rate"]["original_ready"]["one_sided_upper_rate"] is None
     assert certificate["effective_contracts"][item["artifact_id"]]["generation"]["raw_output"] == "malformed output"
 
 
@@ -661,3 +657,59 @@ def test_cli_generation_audit_and_journal_recovery(tmp_path, monkeypatch):
     assert main(["verify-edit-audit", "--edits", str(batch_path), "--audit", str(audit_path),
                  "--output", str(evidence_path)]) == 0
     assert json.loads(evidence_path.read_text())["population_size"] == 4
+
+
+def test_sparse_audit_reports_uncertainty_without_a_pass_mark():
+    traces, manifest, plan = fixture(worlds=10, sources=12, audit_sample_size=2)
+    batch = generate_edit_controls(Editor(), traces, manifest, plan)
+    audit = approved_audit(batch)
+    for index, item in enumerate(audit["items"]):
+        item["checks"]["lengths_comparable"] = False
+        corrected_sample(audit, batch, item_index=index, to_not_editable=index == 0)
+    certificate = validate_batch_audit(batch, audit)
+    assert certificate["status_counts"]["not_editable"] == 1
+    assert certificate["original_status_counts"] == {"ready": 120}
+    assert certificate["audit_error_rate"]["failure_count"] == len(audit["items"])
+    assert certificate["audit_error_rate"]["flaw_rate"] == 1
+    assert certificate["audit_error_rate"]["one_sided_upper_rate"] == 1
+    reports = certificate["audit_error_rate"]["by_source_checkpoint"].values()
+    assert any(item["original_ready"]["sample_size"] == 0 for item in reports)
+    for report in reports:
+        ready = report["original_ready"]
+        assert ready["source_family_size"] == 12
+        assert ready["simultaneous_one_sided_upper_rate"] >= ready["one_sided_upper_rate"]
+        if ready["sample_size"] == 0:
+            assert ready["flaw_rate"] is None and ready["ci95"] == [0, 1]
+
+
+def test_arbitrary_length_ratio_is_reportable_human_quality_not_machine_failure():
+    traces, manifest, plan = fixture(worlds=1, sources=1)
+    def longer(output):
+        output["paraphrase"] *= 3
+        output["irrelevant"]["new"] = "After carefully considering all the events"
+        return output
+    batch = generate_edit_controls(Editor(longer), traces, manifest, plan)
+    assert batch["edits"][0]["generation_status"] == "ready"
+    assert "lengths_comparable" in prepare_batch_audit(batch)["items"][0]["checks"]
+
+
+@pytest.mark.parametrize("classification_only", [False, True])
+def test_known_sampled_flaw_requires_repair_without_numeric_batch_threshold(classification_only):
+    traces, manifest, plan = fixture(worlds=1, sources=1)
+    def not_editable(output):
+        return {"status": "not_editable", "reason_code": "belief_not_stated",
+                "explanation": "Editor reports no focal belief."}
+    batch = generate_edit_controls(Editor(not_editable if classification_only else None), traces, manifest, plan)
+    audit = approved_audit(batch)
+    check = "editability_classification_correct" if classification_only else "semantic_only_intended_fact_changed"
+    audit["items"][0]["checks"][check] = False
+    with pytest.raises(ValueError, match="documented correction and re-review"):
+        validate_batch_audit(batch, audit)
+    original = batch["edits"][0]
+    audit["items"][0]["correction"] = {
+        "controls": manual_controls(original), "reason": "Human repaired the known failed control/classification.",
+        "reviewed_by": "Human second reviewer", "checks": {name: True for name in CHECKS}}
+    result = validate_batch_audit(batch, audit)
+    assert result["audit_complete"] and result["audit_error_rate"]["flaw_rate"] == 1
+    assert result["audit_error_rate"]["failure_count"] == 1
+    assert original["artifact_id"] in result["bound_contract_hashes"]

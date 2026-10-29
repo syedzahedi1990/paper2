@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper2-reasoning-rl"
-version = "0.5.0"
+version = "0.6.0"
 description = "Paper 2: What Does Reasoning RL Change in Belief Tracking?"
 requires-python = ">=3.10,<3.14"
 dependencies = ["numpy>=1.26,<3"]
@@ -12,6 +12,7 @@ dependencies = ["numpy>=1.26,<3"]
 [project.optional-dependencies]
 model = ["torch==2.7.1", "transformers==4.53.2", "peft==0.16.0", "accelerate==1.8.1"]
 train = ["torch==2.7.1", "transformers==4.53.2", "peft==0.16.0", "accelerate==1.8.1", "trl==0.20.0", "datasets==3.6.0"]
+plot = ["matplotlib>=3.8,<4"]
 test = ["pytest>=8,<9", "ruff>=0.11"]
 
 [project.scripts]

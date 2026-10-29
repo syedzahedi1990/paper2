@@ -40,7 +40,10 @@ def test_default_budget_covers_entire_training_pool_in_both_objectives():
     assert sft.training_budget(2000)['resolved_max_steps'] == 250
     assert rl.training_budget(2000)['planned_prompt_exposures'] == 2000
     assert sft.training_budget(2000)['planned_prompt_exposures'] == 2000
-    assert rl.learning_rate == 1e-5 and sft.learning_rate == 1e-4
+    assert rl.learning_rate == 2e-5 and sft.learning_rate == 1e-6
+    assert rl.beta == sft.beta == 0
+    assert (rl.batch_size, rl.gradient_accumulation_steps) == (1, 8)
+    assert (sft.batch_size, sft.gradient_accumulation_steps) == (2, 4)
     assert TrainingConfig(learning_rate=2e-5).learning_rate == 2e-5
     with pytest.raises(ValueError, match='full training-pool pass'):
         TrainingConfig(max_steps=250).training_budget(2000)

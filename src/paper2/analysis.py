@@ -56,7 +56,7 @@ def _baseline_subset(baseline, observations, *, require_balanced_seeds=True):
     return [left[key] for key in right]
 
 
-def cluster_interval(values, seed=2026, samples=2000):
+def cluster_interval(values, seed=2026, samples=20_000):
     """values is world_id -> list of paired observation effects."""
     if not values:
         return {"estimate": None, "ci95": None, "stories": 0}
@@ -69,6 +69,25 @@ def cluster_interval(values, seed=2026, samples=2000):
     boot = means[rng.integers(0, len(means), size=(samples, len(means)))].mean(axis=1)
     return {"estimate": estimate, "ci95": np.quantile(boot, [0.025, 0.975]).tolist(),
             "stories": len(means)}
+
+
+def _ratio_interval(values, seed=2026, samples=20_000):
+    """Bootstrap story-level (numerator, denominator) pairs together."""
+    array = np.asarray([value for _, value in sorted(values.items())], dtype=float)
+    if not len(array):
+        return {"estimate": None, "ci95": None, "stories": 0, "valid_bootstrap_draws": 0}
+    numerator, denominator = array.sum(axis=0)
+    estimate = float(numerator / denominator) if denominator else None
+    interval, valid_draws = None, 0
+    if denominator and len(array) > 1:
+        rng = np.random.default_rng(seed)
+        draws = array[rng.integers(0, len(array), size=(samples, len(array)))].sum(axis=1)
+        valid = draws[:, 1] > 0
+        valid_draws = int(valid.sum())
+        if valid_draws:
+            interval = np.quantile(draws[valid, 0] / draws[valid, 1], [.025, .975]).tolist()
+    return {"estimate": estimate, "ci95": interval, "stories": len(array),
+            "valid_bootstrap_draws": valid_draws}
 
 
 def _joint_patterns(rows):
@@ -87,24 +106,46 @@ def _joint_patterns(rows):
     return patterns, incomplete
 
 
-def accuracy_summary(rows):
+def accuracy_summary(rows, seed=2026, samples=20_000):
+    rows = list(rows)
     _index(rows)
-    by_view = defaultdict(list)
+    by_view, overall = defaultdict(lambda: defaultdict(lambda: defaultdict(list))), defaultdict(lambda: defaultdict(list))
     for row in rows:
-        correct = row["prediction"] == row["answer"]
-        by_view[row["view"]].append(correct)
+        correct = int(row["prediction"] == row["answer"])
+        by_view[row["view"]][row["world_id"]][_seed(row)].append(correct)
+        overall[row["world_id"]][_seed(row)].append(correct)
+
+    def interval(groups):
+        return cluster_interval({world: [float(np.mean(scores)) for scores in seeds.values()]
+                                 for world, seeds in groups.items()}, seed, samples)
+
+    total = interval(overall)
+    views = {}
+    for view, groups in sorted(by_view.items()):
+        result = interval(groups)
+        observations = [value for seeds in groups.values() for values in seeds.values() for value in values]
+        views[view] = {**result, "n": len(observations), "accuracy": result["estimate"],
+                       "micro_accuracy": float(np.mean(observations)) if observations else None}
     patterns, incomplete = _joint_patterns(rows)
     joint = [correct for _, _, _, correct in patterns]
-    return {"n": len(rows), "accuracy": float(np.mean([r["prediction"] == r["answer"] for r in rows])) if rows else None,
-            "per_view": {v: {"n": len(x), "accuracy": float(np.mean(x))} for v, x in sorted(by_view.items())},
-            "joint_all_eight": float(np.mean(joint)) if joint else None,
+    joint_by_world = defaultdict(list)
+    for world, _, _, correct in patterns:
+        joint_by_world[world].append(int(correct))
+    joint_interval = cluster_interval(joint_by_world, seed, samples)
+    return {"n": len(rows), "accuracy": total["estimate"], "ci95": total["ci95"], "stories": total["stories"],
+            "micro_accuracy": float(np.mean([row["prediction"] == row["answer"] for row in rows])) if rows else None,
+            "per_view": views, "joint_all_eight": joint_interval["estimate"],
+            "joint_all_eight_ci95": joint_interval["ci95"], "joint_all_eight_stories": joint_interval["stories"],
             "joint_complete_stories": len(joint), "joint_incomplete_stories": incomplete,
-            "joint_alignment": JOINT_ALIGNMENT,
-            "invalid_answers": sum(r["prediction"] is None for r in rows)}
+            "joint_alignment": JOINT_ALIGNMENT, "invalid_answers": sum(row["prediction"] is None for row in rows),
+            "bootstrap_samples": samples, "bootstrap_seed": seed,
+            "uncertainty": "95% whole-story bootstrap; fixed seeds averaged within each story before resampling stories."}
 
 
-def transfer(base, trained, seed=2026):
+def transfer(base, trained, seed=2026, samples=20_000):
+    base, trained = list(base), list(trained)
     groups = defaultdict(lambda: defaultdict(list))
+    ratio_groups = defaultdict(lambda: defaultdict(lambda: np.zeros(4)))
     preserved, baseline_correct, repairs, errors = 0, 0, 0, 0
     for a, b in paired_rows(base, trained):
         ac, bc = a["prediction"] == a["answer"], b["prediction"] == b["answer"]
@@ -122,19 +163,24 @@ def transfer(base, trained, seed=2026):
         else:
             errors += 1
             repairs += int(bc)
+        ratio_groups[a["world_id"]][_seed(b)] += [int(ac and bc), int(ac), int(not ac and bc), int(not ac)]
+    ratios = {world: np.mean(list(seeds.values()), axis=0) for world, seeds in ratio_groups.items()}
+    preservation = _ratio_interval({world: values[:2] for world, values in ratios.items()}, seed, samples)
+    repair = _ratio_interval({world: values[2:] for world, values in ratios.items()}, seed, samples)
     return {"estimand": "trained_minus_base_direct_answer_accuracy",
-            "effects": {k: cluster_interval(v, seed) for k, v in sorted(groups.items())},
+            "effects": {k: cluster_interval(v, seed, samples) for k, v in sorted(groups.items())},
             "preservation": {"correct_before": baseline_correct, "still_correct": preserved,
-                             "rate": preserved / baseline_correct if baseline_correct else None},
+                             **preservation, "rate": preservation["estimate"]},
             "error_repair": {"errors_before": errors, "fixed": repairs,
-                             "fraction": repairs / errors if errors else None},
+                             **repair, "fraction": repair["estimate"]},
             "training_seeds": sorted({_seed(r) for r in trained}, key=repr),
+            "bootstrap_samples": samples, "bootstrap_seed": seed,
             "uncertainty": "Fixed training seeds averaged within each story before whole-story bootstrap; not uncertainty over a population of seeds.",
             "scope_definition": "Dependence under the specified symbolic belief edit; event-rewrite scope belongs to Test 3.",
             "interpretation": "Transfer to direct-answer inference; does not identify stored beliefs."}
 
 
-def trace_benefit(baseline, supplied, seed=2026, samples=2000, *, require_balanced_seeds=True):
+def trace_benefit(baseline, supplied, seed=2026, samples=20_000, *, require_balanced_seeds=True):
     by_world = defaultdict(lambda: [0, 0, 0, 0])
     for a, b in paired_rows(baseline, supplied, require_balanced_seeds=require_balanced_seeds):
         ac, bc = a["prediction"] == a["answer"], b["prediction"] == b["answer"]
@@ -160,7 +206,7 @@ def trace_benefit(baseline, supplied, seed=2026, samples=2000, *, require_balanc
             "ceiling": errors == 0}
 
 
-def _crossed_original_contrasts(baselines, cells, identities, seed=2026, samples=2000):
+def _crossed_original_contrasts(baselines, cells, identities, seed=2026, samples=20_000):
     """Paired cluster bootstrap of differences in reader-specific error repair."""
     br, tr, bs, ts = identities
     timings = sorted({key[3] for key in cells if key[2] == "original"})
@@ -269,7 +315,34 @@ def _editability_counts(rows):
             "category_world_counts_note": "World counts can overlap categories when multiple cue renderings are selected."}
 
 
-def _editability_summary(cells):
+def _editability_intervals(rows, seed=2026, samples=20_000):
+    """One source artifact per cue rendering; average source seeds within story."""
+    artifacts = {}
+    for row in rows:
+        source_seed = row.get("source_training_seed", _seed(row))
+        fallback = (_source_checkpoint_key(row), source_seed, row["world_id"],
+                    row.get("cue_condition"), row.get("cue_location"))
+        key = row.get("artifact_id", fallback)
+        value = (row["world_id"], source_seed, row["edit_status"], row.get("edit_initial_status", row["edit_status"]))
+        if key in artifacts and artifacts[key] != value:
+            raise ValueError("One source artifact has conflicting editability seed metadata")
+        artifacts[key] = value
+    final, initial = {}, {}
+    for index, target in ((2, final), (3, initial)):
+        for status in EDIT_STATUSES:
+            groups = defaultdict(lambda: defaultdict(list))
+            for value in artifacts.values():
+                groups[value[0]][value[1]].append(int(value[index] == status))
+            target[status] = cluster_interval({world: [float(np.mean(values)) for values in seeds.values()]
+                                               for world, seeds in groups.items()}, seed, samples)
+    return {"category_rates": final, "initial_category_rates": initial,
+            "editable_fraction": final["editable"]["estimate"], "editable_fraction_ci95": final["editable"]["ci95"],
+            "source_training_seeds": sorted({value[1] for value in artifacts.values()}, key=repr),
+            "bootstrap_samples": samples, "bootstrap_seed": seed,
+            "uncertainty": "95% whole-story bootstrap; source artifacts counted once, cue renderings averaged within source seed, then fixed source seeds within story."}
+
+
+def _editability_summary(cells, seed=2026, samples=20_000):
     """Expose noneditable candidates and support differences, never drop them."""
     groups = defaultdict(list)
     for (reader, source, condition, timing), rows in cells.items():
@@ -282,7 +355,7 @@ def _editability_summary(cells):
                 if row.get("edit_status") is not None:
                     groups[_source_checkpoint_key(row)].append(row)
     if not groups:
-        return {"status": "not_recorded", "by_source_checkpoint": {}, "paired_source_support": []}
+        return {"status": "not_recorded", "by_source_checkpoint": {}, "by_source_arm": {}, "paired_source_support": []}
     reports, eligible_sets, candidate_sets = {}, {}, {}
     for key, rows in sorted(groups.items()):
         label = "|".join(key)
@@ -292,6 +365,8 @@ def _editability_summary(cells):
         plan = plans[0]
         _validate_edit_precision_plan(plan)
         report = _editability_counts(rows)
+        report["micro_editable_fraction"] = report["editable_fraction"]
+        report.update(_editability_intervals(rows, seed, samples))
         support_key = lambda row: (row["world_id"], row.get("cue_condition", "clean"), row.get("cue_location"))
         eligible_sets[key] = {support_key(row) for row in rows if row["edit_status"] == "editable"}
         candidate_sets[key] = {support_key(row) for row in rows}
@@ -310,12 +385,23 @@ def _editability_summary(cells):
                     raise ValueError("Confirmatory editability needs complete eight-view candidate panels")
         report.update(source=key[0], source_checkpoint=rows[0].get("source_checkpoint"), question_timing=key[2],
                       precision_plan=plan,
-                      eligible_count_sufficient=bool(plan and report["editable_worlds"] >= plan["required_worlds"]),
                       conditional_effect_status="requires_edited_outcomes" if report["editable_worlds"] else (
                           "awaiting_editability_assessment" if report["categories"]["not_assessed"]["artifacts"]
                           else "not_estimable_no_editable_worlds"),
-                      precision_requires_measured_intervals=True)
+                      precision_interpretation="Report actual whole-story confidence intervals; no precision cutoff")
         reports[label] = report
+    arm_groups = defaultdict(list)
+    for (source, checkpoint, timing), rows in groups.items():
+        arm_groups[(source, timing)].extend(rows)
+    arm_reports = {}
+    for (source, timing), rows in sorted(arm_groups.items()):
+        report = _editability_counts(rows)
+        report["micro_editable_fraction"] = report["editable_fraction"]
+        report.update(_editability_intervals(rows, seed, samples))
+        report.update(source=source, question_timing=timing,
+                      source_checkpoints=sorted({key[1] for key in groups if key[0] == source and key[2] == timing}),
+                      scope="Selected source-arm/dataset comparison; do not merge different trained arms under one source label")
+        arm_reports[f"{source}|{timing}"] = report
     from itertools import combinations
     support = []
     for left, right in combinations(sorted(groups), 2):
@@ -332,38 +418,120 @@ def _editability_summary(cells):
                         "common_world_cue_panels": len(common), "identical_editable_support": identical,
                         "own_subset_estimands_comparable": identical,
                         "interpretation": "Primary conditional estimates retain each source's own support. Separate paired_edit_source_comparisons explicitly estimates any shared-support contrast."})
-    return {"status": "reported", "by_source_checkpoint": reports, "paired_source_support": support,
+    return {"status": "reported", "by_source_checkpoint": reports, "by_source_arm": arm_reports,
+            "paired_source_support": support,
             "interpretation": "Editability is a separate outcome. Conditional edit effects do not describe absent, contradictory or failed traces."}
 
 
+def _edit_audit_sensitivity(rows, estimate, *, difference=False):
+    """Worst-case effect of flawed controls under the reported sampling bounds.
+
+    The scientific estimator weights worlds equally, then seeds equally within
+    story, then views equally within seed. An audit bounds a count of flawed
+    source contracts, so allocate that count to the largest contract weights;
+    a global flaw fraction must not be assigned independently to every arm.
+    """
+    import math
+    from .io import digest
+    if not rows or estimate is None:
+        return {"status": "not_estimable", "maximum_absolute_bias": None, "sensitivity_range": None}
+    panels = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        panels[row["world_id"]][_seed(row)].append(row)
+    weights, representatives = defaultdict(float), {}
+    for seeds in panels.values():
+        for observations in seeds.values():
+            weight = 1 / (len(panels) * len(seeds) * len(observations))
+            for row in observations:
+                artifact = row.get("artifact_id")
+                if not artifact:
+                    return {"status": "unavailable", "reason": "Contract identities are missing", "maximum_absolute_bias": None,
+                            "sensitivity_range": None}
+                key = _source_checkpoint_key(row), artifact
+                weights[key] += weight
+                representatives[key] = row
+    by_source = defaultdict(list)
+    for key, weight in weights.items():
+        by_source[key[0]].append((weight, representatives[key]))
+    source_bounds, weight_cap, confidences, families = [], 0., set(), set()
+    for source, contracts in sorted(by_source.items()):
+        quality_values = [row.get("edit_audit_quality") for _, row in contracts]
+        quality = quality_values[0]
+        if not isinstance(quality, dict) or any(digest(value) != digest(quality) for value in quality_values):
+            return {"status": "unavailable", "reason": "Missing or inconsistent source-checkpoint audit quality", "maximum_absolute_bias": None,
+                    "sensitivity_range": None}
+        population = quality.get("population_size")
+        upper = quality.get("simultaneous_one_sided_upper_rate")
+        confidence = quality.get("simultaneous_confidence")
+        family_size = quality.get("source_family_size")
+        # Changed controls are no longer the originally sampled machine outputs.
+        # Count their entire weight conservatively, including formerly unready
+        # contracts made editable by human corrections.
+        changed = [(weight, row) for weight, row in contracts if row.get("edit_human_corrected")
+                   or row.get("edit_initial_status", "editable") != "editable"]
+        unchanged = [(weight, row) for weight, row in contracts if not row.get("edit_human_corrected")
+                     and row.get("edit_initial_status", "editable") == "editable"]
+        if (type(population) is not int or population < len(unchanged)
+                or type(confidence) not in (int, float) or not math.isfinite(confidence) or not 0 < confidence < 1
+                or type(family_size) is not int or family_size < len(by_source)
+                or (unchanged and (type(upper) not in (int, float) or not math.isfinite(upper) or not 0 <= upper <= 1))):
+            return {"status": "unavailable", "reason": "No valid simultaneous original-ready source bound", "maximum_absolute_bias": None,
+                    "sensitivity_range": None}
+        correction_weight = sum(weight for weight, _ in changed)
+        flawed_count_cap = min(population, math.ceil(population * upper)) if unchanged else 0
+        sampled_weight_cap = sum(sorted((weight for weight, _ in unchanged), reverse=True)[:flawed_count_cap])
+        cap = min(sum(weight for weight, _ in contracts), correction_weight + sampled_weight_cap)
+        weight_cap += cap
+        confidences.add(confidence)
+        families.add(family_size)
+        source_bounds.append({"source_checkpoint": "|".join(source), "original_ready_population": population,
+                              "audit_sample_size": quality.get("sample_size"), "observed_flaws": quality.get("flaws"),
+                              "simultaneous_upper_flaw_rate": upper, "source_family_size": quality.get("source_family_size"),
+                              "original_ready_flaw_count_cap": flawed_count_cap,
+                              "metric_contracts": len(contracts), "metric_weight": sum(w for w, _ in contracts),
+                              "changed_contracts_worst_case_weight": correction_weight,
+                              "maximum_affected_metric_weight": cap})
+    if len(confidences) != 1 or len(families) != 1:
+        return {"status": "unavailable", "reason": "Inconsistent simultaneous audit families", "maximum_absolute_bias": None,
+                "sensitivity_range": None}
+    width, lower, upper = (2., -1., 1.) if difference else (1., 0., 1.)
+    cap = min(width, width * weight_cap)
+    return {"status": "reported_sensitivity_bound", "maximum_absolute_bias": cap,
+            "sensitivity_range": [max(lower, estimate - cap), min(upper, estimate + cap)],
+            "simultaneous_confidence": next(iter(confidences)),
+            "by_source_checkpoint": source_bounds,
+            "interpretation": "Worst-case sensitivity, not a second confidence interval or an acceptance rule. "
+                              "Source-specific simultaneous original-ready flaw-count bounds are allocated to the largest actual contract weights. "
+                              "Human-changed or originally unready controls receive their full weight conservatively. "
+                              "The bound assumes the recorded random audit and human flaw judgements are valid; it does not establish semantic truth."}
+
+
 def _conditional_edit_metrics(rows, original, plan, seed, samples):
-    groups = defaultdict(lambda: defaultdict(list))
+    groups = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
     for row in rows:
         world = row["world_id"]
         follows = int(row["prediction"] == row["expected_edited_answer"])
-        groups["all_predicted_consequences"][world].append(follows)
+        groups["all_predicted_consequences"][world][_seed(row)].append(follows)
         metric = "changed_target_compliance" if row["expected_edited_answer"] != row.get("expected_before_edit_answer", row["answer"]) else "intact_target_preservation"
-        groups[metric][world].append(follows)
+        groups[metric][world][_seed(row)].append(follows)
     if original is not None:
         baseline = _baseline_subset(original, rows, require_balanced_seeds=False)
         for before, after in paired_rows(baseline, rows, require_balanced_seeds=False):
             if after["expected_edited_answer"] != after.get("expected_before_edit_answer", after["answer"]):
                 effect = int(after["prediction"] == after["expected_edited_answer"]) - int(
                     before["prediction"] == after["expected_edited_answer"])
-                groups["changed_response_increase_vs_original"][after["world_id"]].append(effect)
+                groups["changed_response_increase_vs_original"][after["world_id"]][_seed(after)].append(effect)
     metrics = {}
     for name in ("all_predicted_consequences", "changed_target_compliance", "intact_target_preservation",
                  "changed_response_increase_vs_original"):
-        values = groups[name]
-        result = cluster_interval(values, seed=seed, samples=samples)
-        half_width = max(abs(endpoint - result["estimate"]) for endpoint in result["ci95"]) if result["ci95"] else None
-        is_rate = name != "changed_response_increase_vs_original"
-        result.update(observed_half_width=half_width,
-                      confirmatory_precision_ready=bool(is_rate and plan and plan.get("stage") == "confirmatory"
-                          and result["stories"] >= plan["required_worlds"] and half_width is not None
-                          and half_width <= plan["target_half_width"]),
-                      covered_by_rate_sample_plan=is_rate)
-        metrics[name] = result
+        metrics[name] = cluster_interval({world: [float(np.mean(values)) for values in seeds.values()]
+                                          for world, seeds in groups[name].items()}, seed=seed, samples=samples)
+        selected = rows if name == "all_predicted_consequences" else [
+            row for row in rows if (row["expected_edited_answer"] != row.get("expected_before_edit_answer", row["answer"]))
+            == (name != "intact_target_preservation")]
+        metrics[name]["audit_sensitivity"] = _edit_audit_sensitivity(
+            selected, metrics[name]["estimate"], difference=name == "changed_response_increase_vs_original")
+
     return metrics
 
 
@@ -371,7 +539,7 @@ def _validate_edit_precision_plan(plan):
     if plan is not None:
         from .precision import edit_precision_plan
         expected = edit_precision_plan(plan["selected_worlds"], stage=plan["stage"],
-                     max_worlds=plan["selected_worlds"], half_width=plan["target_half_width"])
+                     max_worlds=plan["selected_worlds"])
         if plan != expected:
             raise ValueError("Invalid targeted-edit precision plan")
 
@@ -429,20 +597,14 @@ def _edit_precision_summary(rows, original, seed, samples):
             "candidate_worlds": None, "editable_worlds": len({row["world_id"] for row in selected})}
         checkpoints["|".join(key)] = {"source_checkpoint": (selected or candidate_groups[key])[0].get("source_checkpoint"),
                                      "editability": counts, "metrics": subgroup}
-    # Pooled support can exceed each source seed's support. It cannot certify
-    # precision when an individual checkpoint's conditional estimate is weak.
-    for name, result in metrics.items():
-        result["confirmatory_precision_ready"] = result["confirmatory_precision_ready"] and all(
-            report["metrics"][name]["confirmatory_precision_ready"] for report in checkpoints.values())
     return {"plan": plan, "metrics": metrics, "by_source_checkpoint": checkpoints,
             "editability": _editability_counts(candidates) if explicit_status else None,
             "estimand": "Compliance or preservation conditional on the source trace being editable",
             "interpretation": "Fixed views and available replicates averaged within story; checkpoint-specific eligible sets and intervals are reported. "
-                              "Candidate stories never substitute for editable stories. Rate planning does not size paired differences, "
-                              "different-support source comparisons, or ratios; no automatic quadrant label."}
+                              "Candidate stories never substitute for editable stories. Report estimates and intervals without precision pass criteria or quadrant labels."}
 
 
-def _trace_control_summary(cells, seed=2026, samples=2000):
+def _trace_control_summary(cells, seed=2026, samples=20_000):
     output = {}
     for key, rows in sorted(cells.items()):
         reader, source, condition, timing = key
@@ -490,11 +652,16 @@ def _trace_control_summary(cells, seed=2026, samples=2000):
                 summary["intact_target_preservation"] = float(np.mean([
                     r["prediction"] == r["expected_edited_answer"] for r in intact])) if intact else None
                 summary["story_precision"] = _edit_precision_summary(rows, original, seed, samples)
+                metrics = summary["story_precision"]["metrics"]
+                summary["predicted_consequence_rate"] = metrics["all_predicted_consequences"]["estimate"]
+                summary["changed_target_compliance"] = metrics["changed_target_compliance"]["estimate"]
+                summary["intact_target_preservation"] = metrics["intact_target_preservation"]["estimate"]
+                summary["accuracy_weighting"] = "Equal worlds after averaging views within seed and fixed seeds within story"
         output["|".join(key)] = summary
     return output
 
 
-def _paired_edit_source_comparisons(cells, seed=2026, samples=2000):
+def _paired_edit_source_comparisons(cells, seed=2026, samples=20_000):
     """Explicit supplemental paired contrasts on shared editable observations.
 
     This deliberately does not replace each source's own conditional estimand.
@@ -538,14 +705,13 @@ def _paired_edit_source_comparisons(cells, seed=2026, samples=2000):
                            "common_comparison_seeds": sorted({key[0] for key in shared}, key=repr),
                            "metrics": {name: cluster_interval(values, seed, samples) for name, values in groups.items()},
                            "estimand": "Right-minus-left edit compliance on the explicitly reported shared editable world/view/cue/comparison-seed panel",
-                           "confirmatory_precision_ready": False,
-                           "interpretation": "Supplemental paired conditional comparison; the rate sample plan does not size differences. "
+                           "interpretation": "Supplemental paired conditional comparison with observed story-level uncertainty. "
                                              "Eligibility is model-dependent; do not generalize this contrast to all candidates or call it a causal arm effect."})
     return output
 
 
 def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
-                    base_source=None, trained_source=None, seed=2026, samples=2000):
+                    base_source=None, trained_source=None, seed=2026, samples=20_000):
     baselines, cells = defaultdict(list), defaultdict(list)
     for r in no_trace:
         baselines[r["reader"]].append(r)
@@ -606,7 +772,7 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
     else:
         contrasts = {"status": "identities_required", "reason": "Supply unambiguous base/trained reader and source labels"}
     return {"cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells, seed, samples),
-            "editability": _editability_summary(cells),
+            "editability": _editability_summary(cells, seed, samples),
             "paired_edit_source_comparisons": _paired_edit_source_comparisons(cells, seed, samples),
             "identities": dict(zip(("base_reader", "trained_reader", "base_source", "trained_source"), identities)),
             "supplied_text_identity_verified": bool(supplied),
@@ -614,20 +780,44 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
             "interpretation": "Reader/source interaction is not a fraction of gain stored in a trace."}
 
 
-def match_checkpoints(dev_summaries, target_accuracy, tolerance=.02):
-    """Select an existing evaluated adapter separately for every arm/dataset/seed."""
+def match_checkpoints(dev_summaries, *, expected_runs=None):
+    """Match saved checkpoints at the highest accuracy every compared run reaches.
+
+    The comparison set is explicit in the output. Optional expected_runs checks
+    that a caller supplied every intended arm/dataset/seed, without assuming that
+    every comparison must include the complete experimental grid.
+    """
     from pathlib import Path
+    from decimal import Decimal
+    import math
     from .io import file_digest
-    if not 0 <= target_accuracy <= 1 or tolerance < 0:
-        raise ValueError("Invalid matching target or tolerance")
-    if any(r.get("split") != "development" for r in dev_summaries):
+    from .training.config import ARMS
+    dev_summaries = list(dev_summaries)
+    if any(row.get("split") != "development" for row in dev_summaries):
         raise ValueError("Accuracy matching must use development data only")
-    by_run = defaultdict(list)
+
+    def run_key(row):
+        if any(row.get(field) is None for field in ("arm", "dataset", "seed")):
+            raise ValueError("Matching needs explicit arm/dataset/seed identities")
+        if row["arm"] not in ARMS:
+            raise ValueError("Unknown trained arm in matching comparison set")
+        return f"{row['arm']}|{row['dataset']}|seed={row['seed']}"
+
+    by_run, identities = defaultdict(list), {}
+    base_records = 0
     for row in dev_summaries:
+        if row.get("arm") in ("base", "untrained_base") or (
+                row.get("arm") is None and row.get("checkpoint_kind") == "base"):
+            base_records += 1
+            continue
         if row.get("format") != "immediate" or row.get("view") != "direct":
             continue
-        if any(row.get(field) is None for field in ("arm", "dataset", "seed", "step", "checkpoint_path")):
-            raise ValueError("Matching needs arm/dataset/seed/step and a saved checkpoint_path")
+        key = run_key(row)
+        if (type(row.get("step")) is not int or row["step"] < 0
+                or not isinstance(row.get("checkpoint_path"), str)
+                or type(row.get("accuracy")) not in (int, float)
+                or not math.isfinite(row["accuracy"]) or not 0 <= row["accuracy"] <= 1):
+            raise ValueError("Matching needs a measured accuracy, nonnegative step and saved checkpoint_path")
         checkpoint = Path(row["checkpoint_path"])
         if not checkpoint.is_dir() or not (checkpoint / "adapter_config.json").is_file():
             raise ValueError(f"Evaluated adapter does not exist: {checkpoint}")
@@ -638,13 +828,46 @@ def match_checkpoints(dev_summaries, target_accuracy, tolerance=.02):
             raise ValueError(f"Evaluated adapter weights do not exist: {checkpoint}")
         if row.get("adapter_sha256") and file_digest(weights) != row["adapter_sha256"]:
             raise ValueError("Evaluated adapter has changed since measurement")
-        key = f"{row['arm']}|{row['dataset']}|seed={row['seed']}"
-        by_run[key]  # Retain runs with no acceptable match, rather than dropping seeds.
-        if abs(row["accuracy"] - target_accuracy) <= tolerance:
-            by_run[key].append(row)
-    return {key: {"status": "matched", "checkpoint": min(rows, key=lambda r: (abs(r["accuracy"] - target_accuracy), r["step"]))}
-            if rows else {"status": "no_match", "checkpoint": None}
-            for key, rows in sorted(by_run.items())}
+        identity = row.get("checkpoint_id", row["checkpoint_path"])
+        if not isinstance(identity, str) or not identity:
+            raise ValueError("Matching requires a stable checkpoint ID")
+        record_key = key, row["step"], identity
+        if record_key in identities:
+            if identities[record_key] != row:
+                raise ValueError("Conflicting measurements for one evaluated checkpoint")
+            continue
+        identities[record_key] = row
+        by_run[key].append(row)
+    if not by_run:
+        raise ValueError("Matching requires saved immediate development checkpoints for trained-arm runs")
+    declared = None
+    if expected_runs is not None:
+        if not isinstance(expected_runs, list) or not expected_runs:
+            raise ValueError("Expected runs must be a nonempty list of arm/dataset/seed identities")
+        declared = [run_key(row) for row in expected_runs]
+        if len(declared) != len(set(declared)):
+            raise ValueError("Expected matching runs contain duplicates")
+        if set(declared) != set(by_run):
+            missing, unexpected = sorted(set(declared) - set(by_run)), sorted(set(by_run) - set(declared))
+            raise ValueError(f"Matching comparison set differs from expected runs: missing={missing}, unexpected={unexpected}")
+    maxima = {key: max(row["accuracy"] for row in rows) for key, rows in by_run.items()}
+    target = min(maxima.values())
+    matches = {}
+    for key, rows in sorted(by_run.items()):
+        checkpoint = min(rows, key=lambda row: (abs(Decimal(str(row["accuracy"])) - Decimal(str(target))), row["step"],
+                                               row.get("checkpoint_id", row["checkpoint_path"])))
+        gap = checkpoint["accuracy"] - target
+        matches[key] = {"checkpoint": checkpoint, "maximum_reached_accuracy": maxima[key],
+                        "actual_accuracy": checkpoint["accuracy"], "accuracy_gap": gap,
+                        "absolute_accuracy_gap": abs(gap), "evaluated_checkpoints": len(rows)}
+    return {"method": "highest_common_reached_accuracy_nearest_saved_checkpoint_v1",
+            "target_accuracy": target, "comparison_set": sorted(by_run),
+            "comparison_set_source": "validated_expected_runs" if declared is not None else "supplied_development_measurements",
+            "excluded_base_records": base_records, "matches": matches,
+            "tie_break": "Nearest accuracy, then earlier step, then lexicographic checkpoint ID",
+            "interpretation": "The target is the minimum of the compared runs' maximum measured direct-answer accuracies. "
+                              "Report achieved gaps; no tolerance cutoff or interpolation. Step-zero adapters may be selected. "
+                              "An input-defined set does not prove that omitted experimental runs were supplied."}
 
 
 def cue_summary(rows):
@@ -658,11 +881,11 @@ def cue_summary(rows):
             correct = row["prediction"] == row["answer"]
             world_accuracy[row["world_id"]].append(correct)
             view_accuracy[row["view"]][row["world_id"]].append(correct)
-        result[key]["micro_accuracy"] = result[key]["accuracy"]
+        result[key]["micro_accuracy"] = result[key].get("micro_accuracy", result[key]["accuracy"])
         result[key]["accuracy"] = float(np.mean([np.mean(values) for values in world_accuracy.values()])) if world_accuracy else None
         result[key]["accuracy_weighting"] = "equal_worlds_after_averaging_renderings"
         for view, worlds in view_accuracy.items():
-            result[key]["per_view"][view]["micro_accuracy"] = result[key]["per_view"][view]["accuracy"]
+            result[key]["per_view"][view]["micro_accuracy"] = result[key]["per_view"][view].get("micro_accuracy", result[key]["per_view"][view]["accuracy"])
             result[key]["per_view"][view]["accuracy"] = float(np.mean([np.mean(values) for values in worlds.values()]))
         joint_worlds = defaultdict(list)
         for world, _, _, correct in _joint_patterns(group)[0]:

@@ -36,3 +36,34 @@ def test_official_opentom_import_is_external_and_keeps_raw_targets(tmp_path):
     assert normalize_answer(" Answer: THE   BASKET. ") == "the basket"
     assert normalize_answer("basket") != normalize_answer("the basket")
     assert summarize_opentom([{**rows[0], **score_opentom(rows[0]["answer_text"], rows[0])}])["accuracy"] == 1.0
+
+
+def test_primary_protocol_defaults_and_removed_numerical_pass_flags():
+    import pytest
+    from paper2.cli import parser
+    args = parser().parse_args(["components", "--input", "rows.jsonl", "--output", "out.jsonl"])
+    assert args.layers is None and not args.all_layers and args.layer_mode == "both"
+    args = parser().parse_args(["opentom-evaluate", "--input", "rows.jsonl", "--output", "out.jsonl"])
+    assert args.opentom_protocol == "official"
+    args = parser().parse_args(["analyze", "match", "--input", "curve.jsonl", "--output", "match.json"])
+    assert args.expected_runs is None
+    for flag in ("--tolerance", "--target-accuracy"):
+        with pytest.raises(SystemExit):
+            parser().parse_args(["analyze", "match", "--input", "curve.jsonl", "--output", "match.json", flag, ".1"])
+
+
+def test_cli_plot_preserves_numeric_data_sidecar(tmp_path):
+    import pytest
+    pytest.importorskip("matplotlib")
+    from test_plotting import point
+    entry = point()
+    for kind in ("transfer", "crossed"):
+        (tmp_path / (kind + ".json")).write_text(json.dumps(entry.pop(kind)))
+        entry[kind + "_path"] = kind + ".json"
+    manifest = tmp_path / "points.json"
+    manifest.write_text(json.dumps({"points": [entry]}))
+    output = tmp_path / "points.png"
+    assert main(["plot", "quadrant", "--input", str(manifest), "--output", str(output)]) == 0
+    data = json.loads((tmp_path / "points.png.json").read_text())
+    assert data["points"][0]["x"]["estimate"] == .1
+    assert data["points"][0]["y"]["estimate"] == .2

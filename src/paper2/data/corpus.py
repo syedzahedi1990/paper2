@@ -247,9 +247,8 @@ def generate_corpus(output_dir: str | Path, config: CorpusConfig | None = None, 
                       for path in sorted(Path(__file__).parent.glob("*.py"))}
     manifest = {"schema_version": CORPUS_SCHEMA, "config": asdict(config),
                 "shortcut_audit": shortcut_audit,
-                "calibration_ready": all(audit["passed"] for audit in shortcut_audit.values()),
-                "required_controls_passed": all(audit["required_controls_passed"] for audit in shortcut_audit.values()),
-                "requires_heuristic_review": any(audit["requires_heuristic_review"] for audit in shortcut_audit.values()),
+                "integrity_passed": all(audit["integrity_passed"] for audit in shortcut_audit.values()),
+                "empirical_calibration_status": "requires_named_review",
                 "depth_two_relation_design": {"weights_out_of_36": RELATION_WEIGHTS,
                                                "allocation": "Largest remainder, separately in every split and decisive-event kind",
                                                "assignment": "Quota labels shuffled before world generation; no outcome-based rejection sampling"},
@@ -285,7 +284,7 @@ def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
     if manifest.get("schema_version") != CORPUS_SCHEMA:
         raise ValueError("Obsolete corpus schema; regenerate v3 data and recalibrate G0")
     if any(audit.get("audit_version") != AUDIT_VERSION for audit in manifest.get("shortcut_audit", {}).values()):
-        raise ValueError("Obsolete shortcut audit; regenerate with audit v4 and recalibrate G0")
+        raise ValueError("Obsolete shortcut audit; regenerate with audit v5 and recalibrate G0")
     expected_hash = digest({"schema_version": CORPUS_SCHEMA, "config": manifest["config"],
                             "files": manifest["files"], "shortcut_audit": manifest["shortcut_audit"]})
     if manifest.get("corpus_hash") != expected_hash:
@@ -320,35 +319,25 @@ def verify_corpus(output_dir: str | Path) -> dict[str, Any]:
                 raise ValueError("Matched-pair cue differs from the clean evaluation cue")
     if shortcut_audit != manifest["shortcut_audit"]:
         raise ValueError("Frozen shortcut audit changed")
-    calibration_ready = all(result["passed"] for result in shortcut_audit.values())
-    if manifest.get("calibration_ready") != calibration_ready:
-        raise ValueError("Frozen calibration readiness changed")
-    required_controls_passed = all(result["required_controls_passed"] for result in shortcut_audit.values())
-    requires_heuristic_review = any(result["requires_heuristic_review"] for result in shortcut_audit.values())
-    if (manifest.get("required_controls_passed") != required_controls_passed or
-            manifest.get("requires_heuristic_review") != requires_heuristic_review):
-        raise ValueError("Frozen shortcut-control or heuristic-review status changed")
+    integrity_passed = all(result["integrity_passed"] for result in shortcut_audit.values())
+    if (manifest.get("integrity_passed") != integrity_passed or
+            manifest.get("empirical_calibration_status") != "requires_named_review"):
+        raise ValueError("Frozen corpus integrity or empirical-review status changed")
     return {"verified": True, "files": len(manifest["files"]), "corpus_hash": manifest["corpus_hash"],
-            "calibration_ready": calibration_ready, "required_controls_passed": required_controls_passed,
-            "requires_heuristic_review": requires_heuristic_review, "shortcut_audit": shortcut_audit, **audit}
+            "integrity_passed": integrity_passed, "empirical_calibration_status": "requires_named_review",
+            "shortcut_audit": shortcut_audit, **audit}
 
 
-def assert_calibration_corpus(output_dir: str | Path, *,
-                              acknowledged_heuristic_risks: bool = False) -> dict[str, Any]:
-    """Recheck bytes and controls; only reviewed residual risks may be accepted.
-
-    The gates module binds a named review and rationale to this corpus hash
-    before setting the acknowledgement flag. It never changes the manifest's
-    measured failure or `calibration_ready` status.
-    """
+def assert_calibration_corpus(output_dir: str | Path) -> dict[str, Any]:
+    """Recheck fixed corpus design and provenance without grading heuristics."""
     output = Path(output_dir)
     result = verify_corpus(output.parent if output.name == "manifest.json" else output)
-    if not result["required_controls_passed"]:
-        raise ValueError("G0 requires passing required stratified shortcut audits with sufficient stories in every cell")
+    if not result["integrity_passed"]:
+        raise ValueError("G0 requires intact declared quotas and complete stratified corpus coverage")
+    if result["story_counts"] != {"train": 2000, "development": 120, "confirmation": 120}:
+        raise ValueError("G0 calibration uses the proposal's fixed 2000/120/120 story splits")
     if any(audit["audit_version"] != AUDIT_VERSION for audit in result["shortcut_audit"].values()):
         raise ValueError("Obsolete shortcut audit; regenerate and recalibrate G0")
-    if result["requires_heuristic_review"] and acknowledged_heuristic_risks is not True:
-        raise ValueError("G0 requires explicit corpus-bound review of remaining position/frequency/observation heuristics")
     return result
 
 

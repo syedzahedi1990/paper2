@@ -86,7 +86,8 @@ def component_summary(before, after):
 
     Fixed seeds are averaged within stories, then stories are bootstrapped.
     We report changed and intact outcomes separately; a pooled probability effect
-    alone is never the H3 consequence-pattern result.
+    alone is never the H3 consequence-pattern result. Each checkpoint's paired
+    intervention-minus-own effect is reported alongside the training contrast.
     """
     from collections import defaultdict
     from paper2.analysis import _seed, cluster_interval
@@ -97,7 +98,11 @@ def component_summary(before, after):
         prefix = f"{row['mask_id']}|{row['component']}|{row['control']}"
         scope = "changed" if row["change_required"] else "intact"
         for suffix in (scope, "view:" + row["view"]):
-            clusters[prefix + "|" + suffix][row["pair_id"]].append(row["training_change_in_effect"])
+            group = prefix + "|" + suffix
+            # Preserve the original unsuffixed training-contrast keys.
+            clusters[group][row["pair_id"]].append(row["training_change_in_effect"])
+            for effect in ("before_effect", "after_effect"):
+                clusters[group + "|" + effect][row["pair_id"]].append(row[effect])
 
     def patterns(rows):
         groups = defaultdict(dict)
@@ -141,6 +146,10 @@ def component_summary(before, after):
                 value = all_scores[key][metric]
                 if value is not None:
                     pattern_clusters[prefix + "|" + metric + "|" + stage][pair].append(float(value))
+                    own_value = all_scores[own_key][metric]
+                    if control != "own" and own_value is not None:
+                        effect = float(value) - float(own_value)
+                        pattern_clusters[prefix + "|" + metric + "|" + stage + "_effect"][pair].append(effect)
             if score[metric] is not None and old[key][metric] is not None:
                 delta = float(score[metric]) - float(old[key][metric])
                 pattern_clusters[prefix + "|" + metric + "|training_change"][pair].append(delta)
@@ -152,4 +161,5 @@ def component_summary(before, after):
             "consequence_patterns": {k: cluster_interval(v) for k, v in sorted(pattern_clusters.items())},
             "g4_positive_controls": {"before": residual_control_summary(before), "after": residual_control_summary(after)},
             "uncertainty": "Fixed seeds averaged within stories; paired whole-story bootstrap.",
+            "effect_definition": "Before/after effects pair each intervention with its own-component control at that checkpoint; unsuffixed probability_effects remain the after-minus-before change in effect.",
             "forecast_account": "event_rewrite"}

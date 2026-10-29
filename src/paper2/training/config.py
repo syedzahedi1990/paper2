@@ -32,12 +32,12 @@ class TrainingConfig:
     # Resolve epochs against prompt groups so the default actually covers the pool.
     max_steps: int | None = None
     num_train_epochs: float = 1.0
-    batch_size: int = 1
-    gradient_accumulation_steps: int = 8
+    batch_size: int | None = None
+    gradient_accumulation_steps: int | None = None
     learning_rate: float | None = None
     lr_scheduler_type: str = 'constant_with_warmup'
     warmup_ratio: float = 0.05
-    beta: float = 0.04
+    beta: float = 0.0
     temperature: float = 0.8
     top_p: float = 1.0
     logging_steps: int = 1
@@ -57,7 +57,11 @@ class TrainingConfig:
         if self.revision is None:
             object.__setattr__(self, 'revision', MODEL_REVISIONS.get(self.model, 'synthetic'))
         if self.learning_rate is None:
-            object.__setattr__(self, 'learning_rate', 1e-5 if self.rl else 1e-4)
+            object.__setattr__(self, 'learning_rate', 2e-5 if self.rl else 1e-6)
+        if self.batch_size is None:
+            object.__setattr__(self, 'batch_size', 1 if self.rl else 2)
+        if self.gradient_accumulation_steps is None:
+            object.__setattr__(self, 'gradient_accumulation_steps', 8 if self.rl else 4)
         if self.eval_steps is None:
             # Native reasoning evaluation is sequential and can dominate a run.
             # Immediate scoring and retained RL snapshots use their own cadence.

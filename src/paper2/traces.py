@@ -47,28 +47,21 @@ def _validate_source_trace(trace):
 
 
 def symbolic_belief_summary(row):
-    """An oracle-premise positive control, not a model-produced summary.
+    """Supply only the queried belief as an oracle-premise positive control.
 
-    The same state description is supplied across all consequence views. Oracle
-    predictions are stored as metadata only. The state prose nevertheless
-    directly supplies the relevant location for many evaluated questions.
+    This is not the model's own summary. Other physical/character states and the
+    per-view answer labels remain metadata, never supplied summary text.
     """
-    from .data.world import StoryWorld, VIEWS, CONFIG, answer_label, ordinary_target
+    from .data.world import StoryWorld, VIEWS, answer_label, ordinary_target
     if "world" not in row:
         raise ValueError("Symbolic belief summaries require an evaluation record with its world")
     world = StoryWorld.from_dict(row["world"])
-    state = world.state()
-    sentences = []
-    for obj in (world.focal_object, world.distractor_object):
-        for word in CONFIG.words():
-            location = state.values[(word, obj)]
-            if not word:
-                sentences.append(f"The {obj} is physically in the {location}.")
-            elif len(word) <= len(world.focal_word):
-                subject = " believes that ".join(word)
-                sentences.append(f"{subject} believes the {obj} is in the {location}.")
-    return {"text": " ".join(sentences), "method": "symbolic_base_state_v1",
-            "world_sha256": digest(row["world"]), "task_grounded": True,
+    location = world.state().values[(world.focal_word, world.focal_object)]
+    subject = " believes that ".join(world.focal_word)
+    return {"text": f"{subject} believes the {world.focal_object} is in the {location}.",
+            "method": "symbolic_queried_belief_v2", "world_sha256": digest(row["world"]),
+            "task_grounded": True, "focal_word": list(world.focal_word),
+            "focal_object": world.focal_object, "location": location,
             "expected_answers": {view: answer_label(ordinary_target(world, view)) for view in VIEWS}}
 
 
@@ -202,7 +195,7 @@ def _validate_oracle_edit(row, contract):
             raise ValueError("Semantic edit differs from the trace-stated location")
 
 
-def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stage="pilot", half_width=.10):
+def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stage="pilot"):
     """Freeze a deterministic world subset before reviewing model outputs.
 
     Selection uses only world IDs and the preregistered seed, not correctness,
@@ -215,7 +208,7 @@ def prepare_edit_manifest(traces, rows=None, *, max_worlds=None, seed=2026, stag
     records = {row["id"]: row for row in rows or ()}
     universe = sorted({trace["world_id"] for trace in traces})
     from .precision import edit_precision_plan
-    precision = edit_precision_plan(len(universe), stage=stage, max_worlds=max_worlds, half_width=half_width)
+    precision = edit_precision_plan(len(universe), stage=stage, max_worlds=max_worlds)
     if stage == "confirmatory" and set(universe) != {row["world_id"] for row in records.values()}:
         raise ValueError("Confirmatory edit planning needs traces covering the complete evaluation world pool")
     if stage == "confirmatory":
@@ -293,10 +286,10 @@ def validate_edit(trace, contract, *, batch_review=None):
         raise ValueError("Edit manifest is not bound to this exact trace")
     if contract.get("source_checkpoint") != trace.get("source_checkpoint"):
         raise ValueError("Edit manifest source checkpoint changed")
-    sampled = (batch_review is not None and batch_review.get("approved_contract_hashes", {}).get(
+    sampled = (batch_review is not None and batch_review.get("bound_contract_hashes", {}).get(
                contract["artifact_id"]) == digest(contract))
     if batch_review is not None and not sampled:
-        raise ValueError("Generated edit differs from its sampled-audit approval")
+        raise ValueError("Generated edit differs from its sampled-audit binding")
     if not sampled and (not contract.get("approved") or not contract.get("reviewed_by")):
         raise ValueError("Trace semantic controls require a reviewed edit manifest (G3)")
     semantic, irrelevant = contract["semantic"], contract["irrelevant"]
@@ -308,10 +301,6 @@ def validate_edit(trace, contract, *, batch_review=None):
         raise ValueError("Name the intermediate fact being edited")
     if not sampled and not irrelevant.get("irrelevant_to_answers"):
         raise ValueError("Irrelevant edit must be reviewed")
-    sem_size = max(len(semantic["old"]), len(semantic["new"]))
-    irr_size = max(len(irrelevant["old"]), len(irrelevant["new"]))
-    if not .5 <= irr_size / max(sem_size, 1) <= 2:
-        raise ValueError("Irrelevant edit must be comparable in text length (0.5–2x)")
     if (not sampled and not contract["paraphrase"].get("meaning_preserved")) or not contract["paraphrase"].get("text"):
         raise ValueError("Paraphrase must have reviewed preserved meaning")
     # Preserve a source answer statement, but do not introduce a new one.
@@ -336,7 +325,7 @@ def _contracts(edits):
         from .precision import edit_precision_plan
         plan = selection["precision"]
         expected_plan = edit_precision_plan(len(selection["universe_world_ids"]), stage=plan["stage"],
-                        max_worlds=selection["max_worlds"], half_width=plan["target_half_width"])
+                        max_worlds=selection["max_worlds"])
         if plan != expected_plan:
             raise ValueError("Edit precision plan was altered")
         if plan["stage"] == "confirmatory" and (selection.get("timing_policy") != "direct_fixed_confirmatory"
@@ -563,6 +552,16 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                              edit_review_mode=("sampled_model_generated" if batch_review else "individual_human")
                                  if selected and condition in EDIT_CONTROLS else None,
                              edit_audit_sha256=batch_review["audit_sha256"] if batch_review and selected else None,
+                             edit_audit_quality=batch_review["audit_error_rate"]["by_source_checkpoint"][
+                                 digest([contract["source"], contract["source_checkpoint"]])]["original_ready"]
+                                 if batch_review and selected and contract else None,
+                             edit_audit_original_flaw=artifact_id in batch_review["audit_error_rate"]["original_failed_artifact_ids"]
+                                 if batch_review and selected else None,
+                             edit_length_ratios={
+                                 "paraphrase_to_original": len(contract["paraphrase"]["text"]) / max(1, len(trace["trace"])),
+                                 "irrelevant_to_semantic": max(len(contract["irrelevant"]["old"]), len(contract["irrelevant"]["new"])) /
+                                     max(1, len(contract["semantic"]["old"]), len(contract["semantic"]["new"]))}
+                                 if contract and edit_status == "editable" else None,
                              edit_generation_plan_sha256=batch_review["plan_sha256"] if batch_review and selected else None,
                              edit_precision_plan=selection.get("precision") if selected else None,
                              expected_edited_answer=expected if condition in EDIT_CONTROLS else None,

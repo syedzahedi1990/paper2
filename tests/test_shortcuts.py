@@ -14,30 +14,28 @@ from paper2.data import (CorpusConfig, LOCATIONS, assert_calibration_corpus, aud
 def test_default_stratified_shortcuts_and_both_nested_relation_directions():
     worlds = generate_world_splits(CorpusConfig())["train"]
     result = audit_shortcuts(worlds, cue_rows=[render_record(world, "direct", "clean") for world in worlds])
-    assert result["required_controls_passed"]
-    assert not result["passed"]
-    assert result["requires_heuristic_review"]
-    assert not result["all_shortcuts_near_chance"]
+    assert result["integrity_passed"]
+    assert "passed" not in result and "requires_heuristic_review" not in result
     assert set(result["strata"]) == {f"depth{depth}__{kind}" for depth in (1, 2) for kind in ("move", "tell")}
     for name, cell in result["strata"].items():
+        assert cell["world_ids"] == sorted(world.world_id for world in worlds
+                                          if name == f"depth{len(world.focal_word)}__{world.critical_event.kind}")
         metrics = cell["metrics"]
-        for rule in ("first_event", "last_event", "initial_location", "clean_cue"):
-            assert abs(metrics[rule]["score"] - 1 / 6) < 0.06
+        assert {"first_event", "last_event", "initial_location", "clean_cue"} <= set(metrics)
         if name.startswith("depth2"):
-            assert 0 < metrics["equal_both"]["score"] < 0.1
-            assert 0.5 < metrics["different_from_both"]["score"] < 0.85
+            assert metrics["equal_both"]["reference_expectation"] == 1 / 36
+            assert metrics["different_from_both"]["reference_expectation"] == 25 / 36
             for rule in ("equal_outer", "equal_inner", "exclude_outer", "exclude_inner", "exclude_both"):
-                assert abs(metrics[rule]["score"] - 1 / 6) < 0.06
+                assert metrics[rule]["reference_expectation"] == 1 / 6
         residual = cell["residual_heuristics"]
-        assert residual["requires_review"] and not residual["all_near_chance"]
+        assert "flagged_rules" not in residual and "all_near_chance" not in residual
         for position in range(1, 10):
             assert residual["metrics"][f"event_position_{position}"]["n"] == cell["n"]
-        for rule in [f"event_position_{position}" for position in range(2, 8)] + ["most_mentioned_location"]:
-            assert rule in residual["flagged_rules"]
-            assert 0.27 < residual["metrics"][rule]["score"] < 0.40
+        for metric in [*metrics.values(), *residual["metrics"].values()]:
+            assert metric["ci95"][0] <= metric["estimate"] <= metric["ci95"][1]
+            assert not {"passed", "sufficient", "maximum_deviation", "requires_review"}.intersection(metric)
         if name.startswith("depth1"):
-            assert "last_both_observed" in residual["flagged_rules"]
-            assert 0.50 < residual["metrics"]["last_both_observed"]["score"] < 0.65
+            assert "last_both_observed" in residual["metrics"]
         else:
             assert "last_both_observed" not in residual["metrics"]
             assert residual["semantic_baselines"]["last_both_observed"]["score"] == 1
@@ -46,7 +44,7 @@ def test_default_stratified_shortcuts_and_both_nested_relation_directions():
 @pytest.mark.parametrize("kind", ["move", "tell"])
 @pytest.mark.parametrize("force_equal", [False, True])
 @pytest.mark.parametrize("count", [30, 400])
-def test_audit_rejects_always_equal_and_always_different_nested_beliefs(kind, force_equal, count):
+def test_audit_reports_always_equal_and_always_different_nested_beliefs_without_score_gate(kind, force_equal, count):
     rng = random.Random(705)
     worlds = []
     for _ in range(count):
@@ -59,15 +57,15 @@ def test_audit_rejects_always_equal_and_always_different_nested_beliefs(kind, fo
         events[-2:] = [replace(event, location=location) for event in events[-2:]]
         worlds.append(replace(world, events=tuple(events)))
     result = audit_shortcuts(worlds)
-    assert not result["required_controls_passed"]
     metric = "equal_both" if force_equal else "different_from_both"
     assert result["strata"][f"depth2__{kind}"]["metrics"][metric]["score"] == 1
-    assert not result["strata"][f"depth2__{kind}"]["metrics"][metric]["passed"]
+    report = result["strata"][f"depth2__{kind}"]["metrics"][metric]
+    assert report["ci95"][1] == 1 and "passed" not in report
 
 
 @pytest.mark.parametrize("depth", [1, 2])
 @pytest.mark.parametrize("kind", ["move", "tell"])
-def test_audit_rejects_first_event_lookup_separately_per_stratum(depth, kind):
+def test_audit_reports_perfect_first_event_lookup_without_numeric_screen(depth, kind):
     rng = random.Random(901)
     worlds = []
     for _ in range(80):
@@ -76,23 +74,22 @@ def test_audit_rejects_first_event_lookup_separately_per_stratum(depth, kind):
         events[0] = replace(events[0], location=ordinary_target(world, "direct"))
         worlds.append(replace(world, events=tuple(events)))
     result = audit_shortcuts(worlds)
-    assert not result["required_controls_passed"]
-    assert not result["strata"][f"depth{depth}__{kind}"]["metrics"]["first_event"]["passed"]
+    report = result["strata"][f"depth{depth}__{kind}"]["metrics"]["first_event"]
+    assert report["score"] == 1 and report["ci95"][1] == 1
+    assert "passed" not in report
 
 
 def test_hidden_moves_do_not_restore_position_or_reverse_belief_shortcuts():
     worlds = generate_world_splits(CorpusConfig(train=2000, hidden_move=True))["train"]
-    assert audit_shortcuts(worlds)["required_controls_passed"]
+    assert audit_shortcuts(worlds)["integrity_passed"]
 
 
 def test_smoke_corpus_and_old_schema_cannot_pass_calibration(tmp_path):
     manifest = generate_corpus(tmp_path, CorpusConfig(train=10, development=1, confirmation=1))
-    assert not manifest["calibration_ready"]
+    assert manifest["empirical_calibration_status"] == "requires_named_review"
     assert verify_corpus(tmp_path)["verified"]
-    with pytest.raises(ValueError, match="shortcut audits"):
+    with pytest.raises(ValueError, match="quotas|coverage|story splits"):
         assert_calibration_corpus(tmp_path / "manifest.json")
-    with pytest.raises(ValueError, match="shortcut audits"):
-        assert_calibration_corpus(tmp_path / "manifest.json", acknowledged_heuristic_risks=True)
     manifest["schema_version"] = "paper2.corpus.v2"
     (tmp_path / "manifest.json").write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="Obsolete corpus schema"):
@@ -103,7 +100,7 @@ def test_missing_event_stratum_and_missing_cues_fail_required_coverage():
     rng = random.Random(171)
     worlds = [generate_world(rng, depth=1, event_kind="move") for _ in range(30)]
     result = audit_shortcuts(worlds, expected_depths=(1, 2), require_cues=True)
-    assert not result["passed"]
+    assert not result["integrity_passed"]
     assert result["coverage"]["missing_strata"] == ["depth1__tell", "depth2__move", "depth2__tell"]
     assert result["coverage"]["worlds_missing_clean_cue"] == 30
 
@@ -113,7 +110,7 @@ def test_joint_relations_use_declared_quotas_in_every_split_and_event_kind(hidde
     splits = generate_world_splits(CorpusConfig(hidden_move=hidden_move))
     for split, worlds in splits.items():
         audit = audit_shortcuts(worlds, require_relation_quotas=True)
-        assert audit["required_controls_passed"]
+        assert audit["integrity_passed"]
         for key, cell in audit["strata"].items():
             if not key.startswith("depth2"):
                 continue
@@ -122,10 +119,10 @@ def test_joint_relations_use_declared_quotas_in_every_split_and_event_kind(hidde
             assert quota["observed"] == quota["planned"] == relation_quota(cell["n"])
             if split != "train":
                 assert quota["observed"] == {"both": 1, "outer_only": 4, "inner_only": 4, "neither": 21}
-                assert cell["metrics"]["different_from_both"]["maximum_deviation"] <= 1 / 30
+                assert "maximum_deviation" not in cell["metrics"]["different_from_both"]
 
 
-def test_quota_audit_rejects_small_relation_imbalance_even_inside_sampling_bound():
+def test_exact_quota_integrity_rejects_small_relation_imbalance():
     worlds = generate_world_splits(CorpusConfig())["development"]
     for index, world in enumerate(worlds):
         if len(world.focal_word) != 2 or world.critical_event.kind != "move":
@@ -139,7 +136,7 @@ def test_quota_audit_rejects_small_relation_imbalance_even_inside_sampling_bound
         worlds[index] = replace(world, events=tuple(events))
         break
     result = audit_shortcuts(worlds, require_relation_quotas=True)
-    assert not result["required_controls_passed"]
+    assert not result["integrity_passed"]
     assert not result["strata"]["depth2__move"]["relation_quota"]["passed"]
 
 
@@ -148,14 +145,14 @@ def test_clean_cue_quota_rejects_incidental_heldout_correlation():
     cues = heldout_clean_cues(worlds)
     rows = [render_record(world, "direct", "clean", cue_location=cues[world.world_id]) for world in worlds]
     audit = audit_shortcuts(worlds, cue_rows=rows, require_clean_cue_quota=True)
-    assert audit["required_controls_passed"]
+    assert audit["integrity_passed"]
     assert all(cell["clean_cue_quota"]["planned_correct"] == 5 for cell in audit["strata"].values())
     for row in rows:
         if row["belief_depth"] == 2 and row["critical_event_kind"] == "tell" and not row["cue_agrees_direct"]:
             row["cue_location"] = row["target_location"]
             break
     audit = audit_shortcuts(worlds, cue_rows=rows, require_clean_cue_quota=True)
-    assert not audit["required_controls_passed"]
+    assert not audit["integrity_passed"]
     assert not audit["strata"]["depth2__tell"]["clean_cue_quota"]["passed"]
 
 
@@ -165,30 +162,33 @@ def test_frequency_ties_use_uniform_accuracy_and_missing_positions_use_declared_
     locations = ("basket", "box", "box", "box", "box", "basket", "basket", "basket", "shelf")
     world = replace(world, events=tuple(replace(event, location=location)
                                       for event, location in zip(world.events, locations)))
-    audit = audit_shortcuts([world], minimum_cell_size=1)
+    audit = audit_shortcuts([world])
     metric = audit["strata"]["depth1__move"]["residual_heuristics"]["metrics"]["most_mentioned_location"]
     assert metric["score"] == 0.5 and metric["tie_worlds"] == 1
     shorter = replace(world, events=world.events[:-1],
                       initial_locations={**world.initial_locations, world.focal_object: "box"})
-    audit = audit_shortcuts([world, shorter], minimum_cell_size=1)
+    audit = audit_shortcuts([world, shorter])
     metric = audit["strata"]["depth1__move"]["residual_heuristics"]["metrics"]["event_position_9"]
     assert metric["n"] == 2 and metric["score"] == 0.5 and metric["initial_fallback_worlds"] == 1
 
 
-def test_only_acknowledged_residual_risks_may_pass_calibration(monkeypatch):
+def test_calibration_corpus_checks_integrity_not_heuristic_accuracy(monkeypatch):
     from paper2.data import corpus
-    verified = {"required_controls_passed": True, "calibration_ready": False,
-                "requires_heuristic_review": True,
-                "shortcut_audit": {"train": {"audit_version": "paper2.shortcuts.v4"}}}
+    verified = {"integrity_passed": True, "empirical_calibration_status": "requires_named_review",
+                "story_counts": {"train": 2000, "development": 120, "confirmation": 120},
+                "shortcut_audit": {"train": {"audit_version": "paper2.shortcuts.v5"}}}
     monkeypatch.setattr(corpus, "verify_corpus", lambda _: verified)
-    with pytest.raises(ValueError, match="corpus-bound review"):
+    assert assert_calibration_corpus("any-path") == verified
+    verified["integrity_passed"] = False
+    with pytest.raises(ValueError, match="quotas|coverage"):
         assert_calibration_corpus("any-path")
-    assert assert_calibration_corpus("any-path", acknowledged_heuristic_risks=True) == verified
-    # Acknowledgement must never relabel the measured audit as a success.
-    assert not verified["calibration_ready"]
-    verified["required_controls_passed"] = False
-    with pytest.raises(ValueError, match="required stratified"):
-        assert_calibration_corpus("any-path", acknowledged_heuristic_risks=True)
+
+
+def test_tiny_strata_still_report_intervals_without_an_invented_minimum_size():
+    world = generate_world(random.Random(731), depth=1, event_kind="move")
+    metric = audit_shortcuts([world])["strata"]["depth1__move"]["metrics"]["first_event"]
+    assert metric["n"] == 1 and metric["ci95"] == [0., 1.]
+    assert "sufficient" not in metric
 
 
 def test_old_shortcut_audit_requires_new_manifest_even_when_story_schema_is_current(tmp_path):

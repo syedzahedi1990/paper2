@@ -1,4 +1,4 @@
-"""External OpenToM check with options, canonical scoring, and upstream diagnostics."""
+"""Pinned official OpenToM prompts/macro-F1, with a separate adapted protocol."""
 import json
 import re
 from pathlib import Path
@@ -7,7 +7,11 @@ from .io import digest, file_digest, write_jsonl, write_json
 from .prompts import SYSTEM, ANSWER_DELIMITER
 
 OPENTOM_REVISION = "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5"
-SCORING_PROTOCOL = "opentom_options_v2"
+SCORING_PROTOCOL = "opentom_options_v2"  # Imported row schema, shared by both evaluation protocols.
+OFFICIAL_PROTOCOL = "opentom_official_v1"
+ADAPTED_PROTOCOL = "opentom_adapted_v2"
+OFFICIAL_SYSTEM = "You are an expert in modeling other's mental state."
+OFFICIAL_COT = "Reason step by step before answering. Write the answer in the end."
 # An explicit metadata correction in the pinned file. This rule uses only the
 # plot's location string; neither the question's answer nor a model output.
 LOCATION_METADATA_CORRECTIONS = {"center of dinint table": "center of dining table"}
@@ -195,11 +199,87 @@ def import_opentom(source, output, source_url=None):
                "gold_self_score_correct": len(output_rows),
                "upstream_gold_self_score_failures": sum(not row["gold_scoring_audit"]["upstream_correct"] for row in output_rows),
                "location_metadata_corrections": LOCATION_METADATA_CORRECTIONS,
-               "prompt_adaptation": "Shared chat wrapper, question-type answer options; not exact published benchmark prompts"})
+               "evaluation_protocols": [OFFICIAL_PROTOCOL, ADAPTED_PROTOCOL],
+               "prompt_adaptation": "Default official system/user text in Qwen chat serialization; secondary adapted Paper 2 wrapper is not exact published benchmark prompts"})
     return output_rows
 
 
-def evaluate_opentom(backend, rows, reasoning=False):
+def official_prompt(row, reasoning=False):
+    """Exact upstream normal-narrative template/build_prompt text (no SimToM).
+
+    Attributed to seacowx/OpenToM, pinned OPENTOM_REVISION, CC BY-NC 4.0.
+    Qwen uses its own chat serialization around these system/user messages.
+    Keep upstream CoT string operations, including their punctuation behavior.
+    """
+    question, kind = row["question"], row["answer_kind"]
+    stem = ("Read and comprehend the following short story. Then, answer the question that follows."
+            f"\n\n{row['story']}\n\nQuestion: ")
+    if kind == "attitude":
+        question = question.split("?")[0].strip() + ", assuming that you observed the action?"
+        prompt = stem + question + ' Answer with "positive", "neutral", or "negative".'
+        prompt += " " + (OFFICIAL_COT if reasoning else "Answer without any explanation.")
+    else:
+        if kind == "fullness":
+            question += ' Answer with "more full", "equally full", or "less full".'
+        elif kind == "accessibility":
+            question += ' Answer with "more accessible", "equally accessible", or "less accessible".'
+        suffix = (' Answer the question with "Yes" or "No". Do not give any explanation.'
+                  if kind == "coarse_location" else " Answer the question without any explanation.")
+        prompt = stem + question + suffix + "\n"
+        if reasoning:
+            if kind in ("coarse_location", "fullness", "accessibility"):
+                prompt = ".".join(prompt.split(".")[:-2]) + ". " + OFFICIAL_COT
+            else:
+                prompt = prompt.split("?")[0] + "? " + OFFICIAL_COT
+    return prompt.strip()
+
+
+def official_parse_answer(text, reasoning=False):
+    """Upstream OpenToMEvaluator.parse_cot_answer applied to a stripped output."""
+    text = text.strip()
+    if reasoning:
+        return text.split("\n")[-1] if "\n" in text else text.split("Therefore")[-1]
+    return text
+
+
+def evaluate_opentom(backend, rows, reasoning=False, protocol="official"):
+    if protocol == "adapted":
+        yield from _evaluate_adapted(backend, rows, reasoning)
+        return
+    if protocol != "official":
+        raise ValueError("OpenToM protocol must be official or adapted")
+    for row in rows:
+        if row.get("split") != "external_test" or row.get("dataset") != "opentom":
+            raise ValueError("External check only accepts explicitly marked OpenToM test records")
+        if row.get("scoring_protocol") != SCORING_PROTOCOL:
+            raise ValueError("Re-import OpenToM with question options and type-specific scoring")
+        kind, options = question_protocol({"question": row["question"], "type": row["question_type"]}, row["plot_info"])
+        if (kind, options) != (row["answer_kind"], row["answer_options"]):
+            raise ValueError("OpenToM answer options differ from the question/plot-derived protocol")
+        user = official_prompt(row, reasoning)
+        messages = [{"role": "system", "content": OFFICIAL_SYSTEM}, {"role": "user", "content": user}]
+        prompt = backend.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        # Official CoT is one uninterrupted completion. No Paper 2 answer suffix,
+        # injected trace, location options, forced delimiter, or second answer call.
+        generated = backend.generate(prompt, max_new_tokens=384 if reasoning else 32,
+                                     stop=None if reasoning else "\n")
+        raw = generated["text"]
+        prediction = official_parse_answer(raw, reasoning)
+        adapted = score_opentom(prediction, row)
+        official = upstream_score(prediction, row)
+        yield {**row, "evaluation_protocol": OFFICIAL_PROTOCOL, "reader": backend.checkpoint_id,
+               "format": "reasoning" if reasoning else "immediate", "prediction_text": prediction,
+               "raw_generation": raw, "prompt_messages": messages, "prompt_sha256": digest(prompt),
+               "primary_metric": "macro_f1", "scorer": "pinned_official",
+               **official, "prediction_label": official["upstream_prediction_label"],
+               "target_label": official["upstream_target_label"], "correct": official["upstream_correct"],
+               "report_included": official["upstream_report_included"],
+               "adapted_score_diagnostic": adapted, "trace": raw if reasoning else None,
+               "forced_delimiter": False, "truncated": generated["truncated"],
+               "max_new_tokens": 384 if reasoning else 32}
+
+
+def _evaluate_adapted(backend, rows, reasoning=False):
     for row in rows:
         if row.get("split") != "external_test" or row.get("dataset") != "opentom":
             raise ValueError("External check only accepts explicitly marked OpenToM test records")
@@ -231,7 +311,7 @@ def evaluate_opentom(backend, rows, reasoning=False):
             prompt += "Answer:"
         generated = backend.generate(prompt, max_new_tokens=32, stop="\n")
         prediction = generated["text"].split("\n", 1)[0]
-        yield {**row, "reader": backend.checkpoint_id, "format": "reasoning" if reasoning else "immediate",
+        yield {**row, "evaluation_protocol": ADAPTED_PROTOCOL, "reader": backend.checkpoint_id, "format": "reasoning" if reasoning else "immediate",
                "prediction_text": prediction, **score_opentom(prediction, row),
                "trace": trace, "forced_delimiter": forced,
                "truncated": generated["truncated"] or trace_truncated}
@@ -248,7 +328,7 @@ def _macro_f1(rows, labels, *, upstream=False):
     return sum(values) / len(values) if rows else None
 
 
-def summarize_opentom(rows):
+def _summarize_adapted(rows):
     from collections import defaultdict
     rows = list(rows)
     types, subtypes = defaultdict(list), defaultdict(list)
@@ -273,3 +353,82 @@ def summarize_opentom(rows):
             "by_type": {key: {"n": len(values), "accuracy": accuracy(values)} for key, values in sorted(types.items())},
             "by_subtype": summaries, "scoring_protocol": SCORING_PROTOCOL,
             "interpretation": "Adapted OpenToM check: options and type-specific scoring; invalid primary answers count as wrong. Shared chat wrapper, not exact published benchmark reproduction. Report separately from controlled-world accuracy."}
+
+
+def _official_metrics(values, *, samples=20000, seed=2026):
+    import numpy as np
+    included = [row for row in values if row["upstream_report_included"]]
+    labels = sorted({row[key] for row in included
+                     for key in ("upstream_target_label", "upstream_prediction_label")})
+    result = {"n": len(values), "included": len(included), "excluded": len(values) - len(included),
+              "macro_f1": _macro_f1(included, labels, upstream=True),
+              "accuracy": sum(row["upstream_correct"] for row in included) / len(included) if included else None,
+              "accuracy_full_denominator": sum(row["upstream_correct"] for row in values) / len(values) if values else None,
+              "invalid_prediction_rate": sum(row["upstream_prediction_label"] in (-1, None) for row in values) / len(values) if values else None}
+    if samples < 1:
+        raise ValueError("OpenToM bootstrap requires positive whole-story resamples")
+    stories = sorted({row.get("world_id", digest(row["story"])) for row in values})
+    indexes = {story: i for i, story in enumerate(stories)}
+    # Story sufficient statistics avoid resampling every raw question 20,000
+    # times. Never treat questions within a narrative as independent units.
+    counts = np.zeros((len(stories), 3 * len(labels) + 4))
+    for row in values:
+        counts[indexes[row.get("world_id", digest(row["story"]))], -1] += 1
+        stat = counts[indexes[row.get("world_id", digest(row["story"]))]]
+        stat[-2] += row["upstream_prediction_label"] in (-1, None)
+        stat[-3] += row["upstream_correct"]
+        stat[-4] += row["upstream_report_included"]
+        if row["upstream_report_included"]:
+            for i, label in enumerate(labels):
+                actual, predicted = row["upstream_target_label"] == label, row["upstream_prediction_label"] == label
+                stat[3 * i:3 * i + 3] += (actual and predicted, not actual and predicted, actual and not predicted)
+    distributions = {key: [] for key in ("macro_f1", "accuracy", "accuracy_full_denominator", "invalid_prediction_rate")}
+    rng = np.random.default_rng(seed)
+    for offset in range(0, samples, 256):
+        sampled = counts[rng.integers(0, len(stories), size=(min(256, samples - offset), len(stories)))].sum(axis=1)
+        for stat in sampled:
+            denoms = 2 * stat[:3 * len(labels):3] + stat[1:3 * len(labels):3] + stat[2:3 * len(labels):3]
+            present = denoms > 0
+            if present.any():
+                distributions["macro_f1"].append(float((2 * stat[:3 * len(labels):3][present] / denoms[present]).mean()))
+            if stat[-4]:
+                distributions["accuracy"].append(float(stat[-3] / stat[-4]))
+            distributions["accuracy_full_denominator"].append(float(stat[-3] / stat[-1]))
+            distributions["invalid_prediction_rate"].append(float(stat[-2] / stat[-1]))
+    result.update({key + "_ci95": np.quantile(data, [.025, .975]).tolist() if data else [None, None]
+                   for key, data in distributions.items()})
+    result["bootstrap"] = {"unit": "whole_story", "stories": len(stories), "samples": samples, "seed": seed,
+                           "undefined_macro_f1_resamples": samples - len(distributions["macro_f1"])}
+    return result
+
+
+def summarize_opentom(rows, *, samples=20000, seed=2026):
+    """Never pool models, response formats, or incompatible label spaces."""
+    from collections import defaultdict
+    rows = list(rows)
+    groups = defaultdict(list)
+    for row in rows:
+        groups[(row.get("evaluation_protocol", ADAPTED_PROTOCOL), row.get("reader", "unspecified"),
+                row.get("format", "unspecified"))].append(row)
+    if len(groups) != 1:
+        return {"n": len(rows), "by_run": {"|".join(key): summarize_opentom(values, samples=samples, seed=seed)
+                                            for key, values in sorted(groups.items())}}
+    (protocol, reader, response_format), rows = next(iter(groups.items()))
+    if protocol == ADAPTED_PROTOCOL:
+        return {**_summarize_adapted(rows), "evaluation_protocol": protocol, "reader": reader,
+                "format": response_format, "role": "secondary_adapted_check"}
+    if protocol != OFFICIAL_PROTOCOL:
+        raise ValueError("Unrecognized OpenToM evaluation protocol")
+    subtypes = defaultdict(list)
+    for row in rows:
+        subtypes[(row["question_type"], row["answer_kind"])].append(row)
+    summaries = {"|".join(key): _official_metrics(values, samples=samples, seed=seed) for key, values in sorted(subtypes.items())}
+    # Official reporting combines fullness/accessibility labels within each
+    # multihop order as well as reporting them separately. Locations of different
+    # granularities remain separate; their integer labels are not commensurable.
+    multihop = {kind: _official_metrics([row for row in rows if row["question_type"] == kind], samples=samples, seed=seed)
+                for kind in sorted({row["question_type"] for row in rows if row["answer_kind"] in ("fullness", "accessibility")})}
+    return {"n": len(rows), "reader": reader, "format": response_format,
+            "evaluation_protocol": OFFICIAL_PROTOCOL, "upstream_revision": OPENTOM_REVISION,
+            "primary_metric": "macro_f1", "by_subtype": summaries, "multihop_combined": multihop,
+            "interpretation": "Pinned official OpenToM prompt text and lexical scorer; macro-F1 per subtype uses official invalid-output exclusions, shown explicitly. Qwen chat serialization and full normal-length corpus; not a reproduction of Zhong et al.'s unavailable split or training/evaluation prompts."}

@@ -25,8 +25,8 @@ def main():
     args = parser.parse_args()
     from transformers import AutoTokenizer
     verified = verify_corpus(args.data)
-    if not verified["required_controls_passed"]:
-        raise ValueError("Required structural controls failed; inspect the shortcut audit")
+    if not verified["integrity_passed"]:
+        raise ValueError("Declared design integrity failed; inspect the shortcut audit")
     manifest = json.loads((args.data / 'manifest.json').read_text())
     tokenizer = AutoTokenizer.from_pretrained(args.model, revision=MODEL_REVISIONS[args.model],
                                               local_files_only=args.local_files_only)
@@ -61,9 +61,8 @@ def main():
     output['shortcut_audit_sha256'] = file_digest(args.output.parent / 'shortcut-audit.json')
     write_json(args.output, output)
     print(json.dumps({'corpus_hash': verified['corpus_hash'], 'tokenizer': output['tokenizer'],
-                      'required_controls_passed': verified['required_controls_passed'],
-                      'requires_heuristic_review': verified['requires_heuristic_review'],
-                      'calibration_ready': verified['calibration_ready']}))
+                      'integrity_passed': verified['integrity_passed'],
+                      'empirical_calibration_status': verified['empirical_calibration_status']}))
 
 
 if __name__ == '__main__':

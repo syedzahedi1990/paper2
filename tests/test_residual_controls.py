@@ -10,7 +10,7 @@ from paper2.interventions import component_summary
 from paper2.io import file_digest, write_jsonl
 
 
-def controls(layers=(1,), *, positive=True, test_layers="same"):
+def controls(layers=(1, 2, 3), *, positive=True, test_layers="same"):
     test_layers = list(layers) if test_layers == "same" else test_layers
     rows = []
     for pair in ("pair-a", "pair-b"):
@@ -65,9 +65,9 @@ def test_layer_zero_and_final_only_cannot_certify_g4_even_with_perfect_predictio
 
 
 def test_nontrivial_measured_control_reports_pattern_effect_and_requires_hashed_evidence(tmp_path):
-    rows = controls((1, 2))
+    rows = controls((1, 2, 3))
     summary = residual_control_summary(rows)
-    assert summary["eligible_masks"] == ["1,2"]
+    assert summary["eligible_masks"] == ["1,2,3"]
     assert summary["empirical_gate_passed"] is False
     candidate = summary["candidates"][0]
     assert candidate["effects"]["natural|changed_accuracy"] == {"estimate": 1., "ci95": [1., 1.], "stories": 2}
@@ -80,11 +80,11 @@ def test_nontrivial_measured_control_reports_pattern_effect_and_requires_hashed_
         verify_g4_positive_control(gate, tmp_path)
 
 
-def test_geometry_does_not_make_a_zero_effect_a_positive_control(tmp_path):
+def test_complete_zero_effect_evidence_is_reported_for_named_review_without_a_cutoff(tmp_path):
     rows = controls(positive=False)
-    assert residual_control_summary(rows)["eligible_masks"] == ["1"]
-    with pytest.raises(ValueError, match="did not improve"):
-        verify_g4_positive_control(gate_for(tmp_path, rows), tmp_path)
+    result = verify_g4_positive_control(gate_for(tmp_path, rows), tmp_path)
+    assert result["effects"]["natural|changed_accuracy"]["estimate"] == 0
+    assert result["effects"]["natural|changed_accuracy"]["ci95"] == [0., 0.]
 
 
 def test_missing_receipt_incomplete_panel_and_changed_targets_fail_closed(tmp_path):
@@ -114,7 +114,7 @@ def test_interior_layers_never_certify_an_undeclared_or_different_test_band(tmp_
 
 
 def test_control_requires_complete_same_band_key_value_receipts(tmp_path):
-    rows = controls((1, 2))
+    rows = controls((1, 2, 3))
     missing = [row for row in rows if row["component"] != "k"]
     assert residual_control_summary(missing)["eligible_masks"] == []
     with pytest.raises(ValueError, match="aligned with the declared K/V"):
@@ -125,11 +125,18 @@ def test_control_requires_complete_same_band_key_value_receipts(tmp_path):
 
 
 def test_gate_binds_exact_control_band_to_frozen_calibration(tmp_path):
-    rows = controls((1, 2))
+    rows = controls((1, 2, 3))
     gate = gate_for(tmp_path, rows)
-    assert verify_g4_positive_control(gate, tmp_path, expected_test_layers=[1, 2])["eligible"]
+    assert verify_g4_positive_control(gate, tmp_path, expected_test_layers=[1, 2, 3])["eligible"]
     with pytest.raises(ValueError, match="frozen calibration band"):
         verify_g4_positive_control(gate, tmp_path, expected_test_layers=[2])
     gate["positive_control"]["test_layers"] = [1]
     with pytest.raises(ValueError, match="exactly match"):
         verify_g4_positive_control(gate, tmp_path)
+
+
+def test_narrow_diagnostic_band_cannot_authorize_the_fixed_primary_design(tmp_path):
+    rows = controls((1, 2))
+    assert residual_control_summary(rows)["eligible_masks"] == ["1,2"]
+    with pytest.raises(ValueError, match="every layer from 1"):
+        verify_g4_positive_control(gate_for(tmp_path, rows), tmp_path)

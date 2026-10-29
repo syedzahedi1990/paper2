@@ -151,6 +151,33 @@ def test_seed_effects_are_averaged_inside_story_not_bootstrapped_as_extra_storie
         transfer(before, after[:-1])
 
 
+def test_joint_accuracy_reports_story_interval_with_seeds_averaged_inside_story():
+    rows = [row(str(world), "A" if world == 0 or seed == 1 else "B", view=view, training_seed=seed)
+            for world in range(2) for seed in (1, 2) for view in VIEWS]
+    result = accuracy_summary(rows)
+    assert result["bootstrap_samples"] == 20_000
+    assert result["joint_all_eight"] == .75
+    assert result["joint_all_eight_stories"] == 2
+    assert result["joint_all_eight_ci95"] == [.5, 1.]
+    assert result["joint_complete_stories"] == 4
+
+
+def test_preservation_and_repair_report_paired_story_ratio_intervals():
+    base = [row(str(world), prediction, view=view) for world in range(2)
+            for prediction, view in (("A", "direct"), ("B", "search"))]
+    trained = [dict(item, training_seed=seed, prediction="A" if item["world_id"] == "0" or seed == 1 else "B")
+               for seed in (1, 2) for item in base]
+    result = transfer(base, trained)
+    assert result["bootstrap_samples"] == 20_000
+    for name in ("preservation", "error_repair"):
+        assert result[name]["estimate"] == .75
+        assert result[name]["ci95"] == [.5, 1.]
+        assert result[name]["stories"] == 2
+        assert result[name]["valid_bootstrap_draws"] == 20_000
+    ceiling = transfer([row("one", "A"), row("two", "A")], [row("one", "A"), row("two", "A")])
+    assert ceiling["error_repair"]["estimate"] is None and ceiling["error_repair"]["ci95"] is None
+
+
 def test_cue_contrast_separates_direct_from_oppositely_affected_consequences():
     rows = [row('w', 'A', cue_condition='agree'), row('w', 'B', cue_condition='conflict'),
             row('w', 'B', view='world', cue_condition='agree'),
@@ -206,12 +233,13 @@ def test_matching_preserves_seeds_and_requires_saved_measured_weights(tmp_path):
     records = [{**common, 'seed': seed, 'format': 'immediate', 'accuracy': score}
                for seed, score in ((1, .5), (2, .51), (3, .9))]
     records.append({**common, 'seed': 1, 'format': 'native_reasoning', 'accuracy': .7})
-    result = match_checkpoints(records, .5)
-    assert len(result) == 3 and result['reasoning_rl|clean|seed=3']['status'] == 'no_match'
-    assert result['reasoning_rl|clean|seed=1']['checkpoint']['step'] == 25
+    result = match_checkpoints(records)
+    assert len(result['matches']) == 3 and result['target_accuracy'] == .5
+    assert result['matches']['reasoning_rl|clean|seed=3']['absolute_accuracy_gap'] == .4
+    assert result['matches']['reasoning_rl|clean|seed=1']['checkpoint']['step'] == 25
     weights.write_bytes(b'changed')
     with pytest.raises(ValueError, match='changed'):
-        match_checkpoints(records, .5)
+        match_checkpoints(records)
 
 
 def test_crossed_seed_pool_reuses_base_baseline_without_triple_counting_repair_rate():

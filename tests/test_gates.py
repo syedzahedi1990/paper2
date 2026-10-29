@@ -15,7 +15,7 @@ def reviewed(tmp_path, monkeypatch):
     evidence = tmp_path / "evidence.json"
     write_json(evidence, {"measured": True})
     review = initial_review()
-    review["calibration"] = {"frozen": True, "manifest_sha256": "0" * 64, "settings": {"g4_test_layers": [6, 7]}}
+    review["calibration"] = {"frozen": True, "manifest_sha256": "0" * 64, "settings": {"g4_layer_policy": "all_after_embedding_layer", "g4_test_layers": list(range(1, 36))}}
     review["gates"] = {name: {"status": "pass", "reviewed_by": "Reviewer", "rationale": "Audited measurements",
                               "evidence": [{"path": evidence.name, "sha256": file_digest(evidence)}]}
                        for name in review["gates"]}
@@ -119,7 +119,7 @@ def test_paid_control_is_bound_to_frozen_band(reviewed, monkeypatch):
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control",
                         lambda *_, expected_test_layers: received.append(expected_test_layers))
     assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
-    assert received == [[6, 7]]
+    assert received == [list(range(1, 36))]
     review["calibration"]["settings"].pop("g4_test_layers")
     write_json(gate, review)
     with pytest.raises(ValueError, match="declared in frozen"):
@@ -143,3 +143,47 @@ def test_g0_rejects_smoke_corpus_even_with_named_reviewer(tmp_path):
     with pytest.raises(ValueError, match="audit|calibration|insufficient|ready"):
         freeze_calibration(tmp_path / "gates.json", data / "manifest.json", {}, evidence, "Reviewer", "Measured")
     assert not (tmp_path / "gates.json").exists()
+
+
+@pytest.mark.parametrize('estimate', [0., 1 / 6, .5, 1.])
+def test_difficulty_review_preserves_measurements_without_scientific_accuracy_cutoffs(tmp_path, monkeypatch, estimate):
+    monkeypatch.setattr('paper2.data.assert_calibration_corpus', lambda _: {'integrity_passed': True})
+    manifest = tmp_path / 'manifest.json'
+    evidence = tmp_path / 'development.json'
+    write_json(manifest, {'audited': True})
+    write_json(evidence, {'estimate': estimate, 'ci95': [0., 1.]})
+    settings = {'g4_layer_policy': 'all_after_embedding_layer', 'difficulty_review': {'estimate': estimate, 'ci95': [0., 1.],
+                'relation_to_chance_and_ceiling': 'Named reviewer interprets this interval relative to chance and ceiling.'}}
+    review = freeze_calibration(tmp_path / 'review.json', manifest, settings, evidence, 'Reviewer',
+                                'Development difficulty and all heuristic estimates were reviewed.')
+    assert review['calibration']['settings'] == settings
+    assert review['gates']['G0']['evidence'][0]['sha256'] == file_digest(evidence)
+
+
+@pytest.mark.parametrize('review', [None, {'estimate': float('nan'), 'ci95': [0., 1.]},
+    {'estimate': .5, 'ci95': [.8, .2], 'relation_to_chance_and_ceiling': 'Reversed interval'},
+    {'estimate': .5, 'ci95': [.2, .8], 'relation_to_chance_and_ceiling': ''}])
+def test_difficulty_review_requires_valid_measurements_and_interpretation(review):
+    from paper2.gates import _validate_difficulty_review
+    with pytest.raises(ValueError, match='difficulty'):
+        _validate_difficulty_review({'difficulty_review': review})
+
+
+def test_frozen_g4_policy_is_architecture_relative_and_pilot_list_is_not_reused_for_7b(reviewed, monkeypatch):
+    gate, report, review, _ = reviewed
+    received = []
+    monkeypatch.setattr('paper2.gates.verify_g4_positive_control',
+                        lambda *_, expected_test_layers: received.append(expected_test_layers))
+    assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct'}, gate, report)
+    assert received == [list(range(1, 36))]  # Check the reviewed 3B pilot evidence.
+    review['calibration']['settings']['g4_layer_policy'] = 'same_numeric_band_for_all_models'
+    write_json(gate, review)
+    with pytest.raises(ValueError, match='g4_layer_policy'):
+        assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct'}, gate, report)
+
+
+@pytest.mark.parametrize('layers', [[0, 1], [2, 3], [1, 3], [1, True], []])
+def test_frozen_g4_pilot_band_must_start_at_one_and_be_complete(layers):
+    from paper2.gates import _validate_frozen_g4_band
+    with pytest.raises(ValueError, match='pilot test layers'):
+        _validate_frozen_g4_band({'g4_layer_policy': 'all_after_embedding_layer', 'g4_test_layers': layers})

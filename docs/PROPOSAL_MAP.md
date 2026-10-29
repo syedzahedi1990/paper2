@@ -1,46 +1,25 @@
 # Proposal implementation map
 
-The proposal is the design authority. Values it leaves unspecified are implementation choices below and must be frozen after development calibration, before training. This table distinguishes executable support from measurements still requiring the pilot.
+The [source proposal](proposal.txt) is authoritative. The [preregistration](PREREGISTRATION.md) fixes estimands and analyses; the [departure record](PROPOSAL_DEPARTURES.md) explains deliberate changes. A code test is not an empirical pilot gate.
 
-| Requirement | Implementation | Validation or remaining evidence |
+| Requirement | Implementation | Evidence or limitation |
 |---|---|---|
-| Paper 1 world, 20 objects, 6 locations, 2 characters, depth up to 2 | `data/_vendor`, `data/world.py`, `data/provenance.py` | Paper 1’s world, new nine-event story distribution with relation quotas; original oracle retained; scores not directly comparable with Paper 1’s panel |
-| 2000 train / 120 dev / 120 confirmation stories | `data/corpus.py` | Disjoint family/world/story hashes; immutable generated manifest |
-| Direct-belief training, seven unrewarded consequences | `training/data.py`, separate training/supervision exports | Reject held-out splits, non-direct views, world state and unintended trace supervision |
-| 90% shortcut twin with agree/independent/conflict test renders | `data/corpus.py` | Same worlds; exact entity and character counts; tokenizer audit; independent six and conflict five balanced variants |
-| Four trained arms plus base | `training/config.py`, `configs/` | Three pilot configs and 24 confirmatory configs; base evaluated separately |
-| Qwen2.5 3B pilot, 7B final, LoRA, group 8, trace cap 384 | `training/runner.py`, `training/generation.py` | Fixed target modules; real random-Qwen SFT/GRPO integration tests |
-| Reasoning SFT source and extra information | `data/world.py:build_oracle_trace`, training manifests | Symbolic oracle supplies update rule and intermediate focal-belief states |
-| Native and immediate format evaluation | `evaluation.py`, `backend.py`, `prompts.py` | Full-vocabulary argmax primary; restricted-choice result retained only as diagnostic |
-| H1 no-trace transfer | `analysis.py:transfer` | Paired story bootstrap, unrewarded views, scope split, preservation |
-| H1 crossed sources and readers | `traces.py`, `analysis.py:crossed_summary` | Per-reader remaining-error denominator; ceiling -> undefined, regressions separate |
-| Replay and seven controls | `traces.py`, `edit_generation.py` | Raw-prefix and re-rendered replay separately; fixed editor and audit-v2 sampled human review with preserved original flaws and correction history; noneditable/generation-failed candidates remain reported outcomes |
-| Minimal edit plus regenerated continuation | `traces.py:regenerate_trace_artifacts` | Edit the actually stated focal belief, even if wrong; oracle before/after forecasts separate from world truth; source generates once and both readers consume the same frozen continuation |
-| Targeted-edit precision | `precision.py`, `analysis.py` | 120 default candidate worlds, at least 97 eligible per arm/checkpoint for the .10 rate plan, actual story intervals and paired common-support denominators; inadequate eligibility does not certify precision |
-| Trace before later questions | `traces.py:collect_traces` | One native direct-question trace fixed across later views; primary confirmatory edits require `direct_fixed`; future events excluded |
-| H2 cue dependence and joint outcomes | `analysis.py:cue_summary`, `accuracy_summary` | Balanced replicas averaged within world/view; all eight views required for joint score |
-| Matched direct accuracy | `analysis.py:match_checkpoints`, `training/config.py` | RL immediate evaluation/adapters every 50 steps, native every 250; matching grouped by arm/dataset/seed with unchanged ±0.02 tolerance and explicit unmatched runs |
-| H3 K/V/residual swaps and controls | `interventions/components.py`, `runner.py`, `controls.py`, `scoring.py` | G4 requires complete K/V/residual panels on the exact declared band, bound to frozen settings; real GQA/RoPE tiny-Qwen tests; empirical effects still pending |
-| Within-model primary, cross-model secondary | `ComponentInterventionEngine.swap` | Cross-model prefix identity enforced; explicit secondary CLI donor; identical full inputs and answer alphabets; excluded from primary analysis |
-| OpenToM external check | `opentom.py` | Pinned flat QA schema, question-type options and scoring; documented prompt adaptation and upstream diagnostics |
-| Profiling and compute reporting | `training/ledger.py`, `training/runner.py`, `edit_generation.py` | Separate native/immediate evaluation timers and retained-adapter storage; edit plans record calls and token cap; practical GPU timings and whole-study budget remain pending |
-| G0–G4 and paid-run review | `gates.py`, `docs/PROTOCOL.md` | All gates initially pending; schema-v3/audit-v4 screens and explicit remaining-heuristic review before G0; evidence hashes checked |
-| Conditional Bridge follow-on | No Bridge experiment implemented | Separate proposal and its decision rule required; no calendar-triggered launch |
+| Paper 1 world and oracle | `data/_vendor`, `data/world.py`, `data/provenance.py` | Preserved state engine/vocabulary; new story distribution disclosed |
+| 2,000/120/120 disjoint stories and shortcut twin | `data/corpus.py` | Frozen hashes, exact cue rates and entity/length checks; audit v5 descriptive heuristic estimates/intervals |
+| Four trained arms, base, 3B pilot/7B final, three final seeds | `training/config.py`, `configs/` | Three pilot and 24 final configs; base separately evaluated |
+| Fixed LoRA, GRPO 8, trace cap 384 | `training/runner.py`, `training/generation.py` | Tiny-model native training tests; paid performance remains unmeasured |
+| Direct-only reward; oracle reasoning SFT | `training/data.py`, `data/world.py` | Held-out supervision rejected; extra oracle information disclosed |
+| H1 transfer and crossed reader/source estimands | `analysis.py`, `traces.py` | Unrewarded direct inference; reader-specific error denominator; paired 20,000-story bootstrap |
+| Seven controls, both trace timings | `traces.py`, `edit_generation.py` | Raw/re-rendered replay; one-belief premise; frozen source continuations; primary direct-fixed edits |
+| Model-assisted edit validation | `edit_generation.py` | Frozen editor/prompt/sample; original flaws preserved; exact descriptive audit intervals; validity repairs without flaw cap |
+| Editability and conditional edit effects | `precision.py`, `analysis.py` | All 120 candidates; per-arm intervals and common support; no readiness threshold |
+| H2 scope, cues and whole patterns | `analysis.py` | Oracle per-world scope; per-question cue contrasts and eight-view joint correctness |
+| Accuracy matching | `analysis.py:match_checkpoints` | Common target=min per-run peak; closest saved immediate dev checkpoint; actual gaps reported |
+| H3 aligned primary band | `interventions/` | Joint layers 1–last, K/V/residual with own/natural/signed nulls; per-layer descriptive results |
+| Official OpenToM external evaluation | `opentom.py` | Official prompt parity and subtype macro-F1; adapted secondary; Zhong numerical replication not claimed |
+| Figures with uncertainty | `plotting.py`, CLI `plot` | Both axes with intervals; heuristic reference lines beside model accuracy; no automatic quadrant labels |
+| G0–G4 and budget review | `gates.py`, `docs/PROTOCOL.md` | Named pilot decisions and immutable evidence; structural validity retained; £500 ceiling |
+| Compute accounting | `training/ledger.py`, `runner.py`, edit plans | Training/evaluation/storage/generation counted separately; empirical whole-study cost pending |
+| Conditional Bridge | Separate proposal | No automatic launch or claim of completion |
 
-The proposal's figure gives four **candidate readings** (trace-dependent gain; transfer still sensitive to traces; narrow gain; trace-independent transfer). The implementation reports the two measurements and their controls; it does not automatically label a quadrant as a discovered mechanism.
-
-## Choices left open in the proposal
-
-- Seeds are 1, 2, 3; the corpus seed is 20261102.
-- LoRA uses rank 16, alpha 32, dropout 0, all attention and MLP projection modules. Direct Q/K/V updates are therefore part of the treatment and must be stated when reading Test 3.
-- Initial training settings are in JSON, with a full training-pool pass, arm-specific provisional learning rates and a constant schedule with warmup. These are pilot settings, not established sufficient convergence.
-- Default data mixes depths 1 and 2 and move/communication events. Difficulty controls include distractor events and hidden moves. Recalibrate on development data once if needed, then freeze.
-- Test 3 layers must be supplied explicitly. The proposal does not specify layers; choose and freeze them before confirmatory outcomes. `--g4-test-layers` measures K/V/residual on one declared contiguous interior band, matching frozen `settings.g4_test_layers`; a different residual mask cannot certify it. Full-depth and single-layer diagnostics remain separate.
-- Semantic/paraphrase controls require content review. Machine checks cannot establish that a free-form model trace changed only one fact. Version 0.5 edits the actually stated focal belief and reports scientific noneditability separately from failed editor generations, retaining every candidate denominator. Primary confirmatory edits reuse `direct_fixed` traces; question-dependent edits remain supplemental. Existing source answer statements are allowed, while introducing or changing answer labels is not.
-- Audit v2 freezes the editor and prompt, a global sample of 100 candidates plus source/checkpoint coverage by default, a cap of one original sampled flaw, and an exact one-sided 95% finite-population upper error bound of at most 5% for all candidate contracts. Human corrections and re-review preserve original errors and raw outputs. The eligible-subset bound is separate and no per-arm 5% guarantee follows. Unsampled contracts are not individually approved; altered provenance or missing review still fails. See [the edit-generation protocol](EDIT_GENERATION.md).
-- Confirmatory preparation uses 120 candidates by default: 3,000 contracts for 25 sources and one rendering, compared with 24,000 question-dependent contracts. At least 97 eligible worlds per arm/checkpoint and adequate actual precision are required by the default rate plan. Report conditional effects, common-support comparisons and the coverage that defines each estimand.
-- Numerical pilot thresholds are not invented as proposal requirements. Record the intended effect/precision criteria during calibration and have the named gate reviewer judge the measured evidence.
-
-## Deliberate departures
-
-See [the manuscript disclosure record](PROPOSAL_DEPARTURES.md) for the changed story distribution, remaining weak heuristics, actual-stated-belief edits, conditional estimands and tolerated-error sample audit, oracle-premise control, separate immediate/native schedules, optimization differences and adapted OpenToM scoring. These are changes to disclose, not claims that the original proposal specified them. Version 0.5 uses a new frozen edit/audit lineage; prior audit certificates do not authorize it.
+Compatible Zhong training settings are inherited, with the finite development selection rule in [TRAINING.md](TRAINING.md). Story exposure is matched; optimizer steps differ. Final comparisons include all three fixed seeds and both unconditional and development-matched analyses. The new audit/summary protocol requires fresh frozen artifacts; historical certificates cannot authorize changed content.

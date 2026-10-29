@@ -1,36 +1,52 @@
 {
-  "calibration_ready": false,
   "code_test_config_hash_method": "SHA256 of compact sorted JSON mapping relative path to file SHA256 for src/tests/configs/scripts and pyproject.toml; excludes Python caches and egg-info",
-  "code_test_config_sha256": "7587d41039c8be07707456d8c11ebb195dc8518e6877728e4956f5380d72f2cd",
+  "code_test_config_sha256": "d592c320920c2b812b297b4d01df3298bfa0ecadc338e66a0f330c21a22e03b2",
   "core_environment_without_torch": {
     "errors": 0,
     "failures": 0,
-    "passed": 231,
-    "seconds": 41.46,
+    "passed": 275,
+    "seconds": 45.211,
     "skipped": 12,
     "test_command": "/tmp/paper2-core-review/bin/python -m pytest -q",
-    "tests": 243
+    "tests": 287
   },
-  "corpus_hash": "b5344b9ad3ae4864b7052b32bc00c4c8dfdc5d59953d25222b33274754c50919",
+  "corpus_data_files_compared": 17,
+  "corpus_hash": "0f6ef303cb86d2672fde8f7ac5c641e87b32c66b747245240efe08f49868a8f4",
+  "corpus_rows_identical_to_v050": true,
   "dependency_check": "pip check: passed",
-  "documented_cli_commands_parsed": 38,
+  "documented_cli_commands_parsed": 42,
+  "empirical_calibration_status": "requires_named_review",
+  "empirical_gates_passed": [],
   "errors": 0,
   "failures": 0,
+  "integrity_passed": true,
   "lint": "ruff check .: passed",
+  "manifest_sha256": "01b4e8106d9a178b707a8702ad0724167e4ada03921dec503a8779be4195562c",
+  "official_opentom_prompt_parity": {
+    "comparisons": 27416,
+    "dataset_records": 13708,
+    "formats": [
+      "immediate",
+      "reasoning"
+    ],
+    "mismatches": 0,
+    "upstream_revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5"
+  },
+  "paid_compute_run": false,
+  "passed": 311,
   "platform": "macOS-14.7.4-arm64-arm-64bit",
   "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
   "python": "3.12.14",
-  "required_controls_passed": true,
-  "requires_heuristic_review": true,
   "research_model_training_run": false,
-  "scope": "CPU unit and genuine tiny-Qwen integration; editor outcomes, sampled corrections and conditional analysis tested with deterministic backends; exact audit bound checked by exhaustive small-population enumeration; no research editor-quality validation or empirical G0-G4 decisions",
-  "seconds": 53.62,
+  "scope": "CPU unit and genuine tiny-Qwen integration, exact finite-population interval coverage, official OpenToM prompt/scorer fixtures, matching and control provenance, story/seed weighting and synthetic plot rendering/visual inspection. No pretrained research scores, editor-quality validation or empirical pilot decisions.",
+  "seconds": 54.688,
   "skipped": 0,
   "test_command": ".venv/bin/python -m pytest -q",
-  "tests": 266,
+  "tests": 311,
   "validated_stack": {
     "accelerate": "1.8.1",
     "datasets": "3.6.0",
+    "matplotlib": "3.11.2",
     "numpy": "2.5.4",
     "peft": "0.16.0",
     "pytest": "8.4.2",
@@ -38,8 +54,8 @@
     "transformers": "4.53.2",
     "trl": "0.20.0"
   },
-  "version": "0.5.0",
-  "wheel": "paper2_reasoning_rl-0.5.0-py3-none-any.whl",
-  "wheel_sha256": "166aa29b0481dfceace3dbe91bf0a75f46bf4206d83a1fd6f879d5cbf4a6e7e8",
-  "windows_ci": "Workflow added; not claimed as executed locally"
+  "version": "0.6.0",
+  "wheel": "paper2_reasoning_rl-0.6.0-py3-none-any.whl",
+  "wheel_sha256": "f5486b01df96e8fdd7abb57ace8c59aa4033da6e98f4f91c2faccfc9e7f962a0",
+  "windows_ci": "Workflow configured; not claimed as executed locally"
 }

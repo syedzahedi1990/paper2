@@ -115,23 +115,24 @@ def test_recomputed_text_hash_does_not_silently_change_frozen_artifact_identity(
 
 
 def test_confirmatory_manifest_freezes_precision_and_requires_full_view_panels():
-    # A wider declared bound keeps this test small; the production .10 default needs 97 worlds.
+    # Small fixtures preserve complete-pool selection; production uses all 120.
     worlds = [generate_world(random.Random(seed)) for seed in range(10)]
     pairs = [trace_record(world, view) for world in worlds for view in VIEWS]
     rows, traces = zip(*pairs)
-    manifest = prepare_edit_manifest(traces, rows, stage="confirmatory", half_width=.4)
-    assert manifest["selection"]["precision"]["required_worlds"] == 7
+    manifest = prepare_edit_manifest(traces, rows, stage="confirmatory")
+    assert manifest["selection"]["precision"]["selected_worlds"] == 10
+    assert "required_worlds" not in manifest["selection"]["precision"]
     assert len(manifest["edits"]) == 10  # All candidates provide headroom for uneditable traces.
     assert all(edit["semantic"]["oracle"]["method"] == "focal_belief_edit_v1" for edit in manifest["edits"])
     _contracts(manifest)
     with pytest.raises(ValueError, match="complete eight-view"):
         prepare_edit_manifest([t for t in traces if t["view"] == "direct"],
-                              [r for r in rows if r["view"] == "direct"], stage="confirmatory", half_width=.4)
+                              [r for r in rows if r["view"] == "direct"], stage="confirmatory")
     question_dependent = copy.deepcopy(traces)
     for trace in question_dependent:
         trace["question_timing"] = "question_dependent"
     with pytest.raises(ValueError, match="frozen direct-question"):
-        prepare_edit_manifest(question_dependent, rows, stage="confirmatory", half_width=.4)
+        prepare_edit_manifest(question_dependent, rows, stage="confirmatory")
 
 
 @pytest.mark.parametrize("depth", [1, 2])
@@ -163,3 +164,14 @@ def test_trace_belief_options_keep_truth_separate_and_forecast_from_stated_belie
     after = next(location for location in LOCATIONS if location not in (truth, wrong))
     assert symbolic_edit_prediction(row, after, stated_location=wrong)["expected_answers"] == \
         symbolic_edit_prediction(row, after)["expected_answers"]
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+def test_summary_contains_exactly_the_queried_premise_not_the_full_state(depth):
+    world = generate_world(random.Random(19), depth=depth)
+    result = symbolic_belief_summary(render_record(world, "direct"))
+    location = world.state().values[(world.focal_word, world.focal_object)]
+    subject = " believes that ".join(world.focal_word)
+    assert result["text"] == f"{subject} believes the {world.focal_object} is in the {location}."
+    assert world.distractor_object not in result["text"]
+    assert result["method"] == "symbolic_queried_belief_v2"

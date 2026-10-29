@@ -82,3 +82,35 @@ def test_component_summary_requires_matching_forecast_targets():
     malformed[0]['forecast_target'] = 'C'
     with pytest.raises(ValueError, match='forecast targets'):
         component_summary(before, malformed)
+
+
+def test_checkpoint_effect_intervals_pair_own_controls_before_averaging_seeds_and_stories():
+    before, after = panels()
+    # An already-correct own control makes raw accuracy and intervention effect
+    # disagree. Unequal per-seed probabilities also exercise within-story pairing.
+    for rows in (before, after):
+        for row in rows:
+            if row['control'] != 'own':
+                continue
+            if row['world_id'] == 'p':
+                row['prediction'] = row['forecast_target']
+                row['forecast_probability'] = {None: .6, 1: .7, 2: .3}[row['training_seed']]
+            else:
+                row['forecast_probability'] = .1
+    result = component_summary(before, after)
+    probabilities = result['probability_effects']
+    prefix = '0,1|k|natural|changed'
+    # Before: story effects -.3, .2. After: seed-average story effects .1, .2.
+    assert probabilities[prefix + '|before_effect']['estimate'] == pytest.approx(-.05)
+    assert probabilities[prefix + '|before_effect']['ci95'] == pytest.approx([-.3, .2])
+    assert probabilities[prefix + '|after_effect']['estimate'] == pytest.approx(.15)
+    assert probabilities[prefix + '|after_effect']['ci95'] == pytest.approx([.1, .2])
+    assert probabilities[prefix]['estimate'] == pytest.approx(.2)
+    patterns = result['consequence_patterns']
+    prefix = '0,1|k|natural|changed_accuracy|'
+    assert patterns[prefix + 'after']['estimate'] == .25
+    assert patterns[prefix + 'before_effect'] == {'estimate': -.5, 'ci95': [-1., 0.], 'stories': 2}
+    assert patterns[prefix + 'after_effect'] == {'estimate': -.25, 'ci95': [-.5, 0.], 'stories': 2}
+    assert patterns[prefix + 'training_change_in_effect']['estimate'] == .25
+    assert patterns['0,1|k|signed_permutation|joint_correct|after_effect']['estimate'] == -.5
+    assert all(value['stories'] == 2 for value in probabilities.values())
