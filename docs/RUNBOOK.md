@@ -237,3 +237,26 @@ paper2 plot quadrant --input runs/figure-points.json --output runs/two-measureme
 ```
 
 Both commands save the exact numeric inputs and source hashes beside the figure as `.png.json` (PDF/SVG also supported). The two-axis sidecar retains editability and audit-bias sensitivity; the displayed intervals are story-bootstrap intervals. Unestimable axes are recorded explicitly, never filled in. No quadrant categories or pass lines are drawn. Heuristic figures verify the underlying story identities and show each depth/event stratum separately.
+
+
+## 8. Descriptive H3 comparison across arms
+
+Use `paper2 plot h3` for the revised proposal's eight arm-by-dataset combinations, with one panel each for keys, values and residuals. Its manifest binds raw Test 1 and Test 3 files, their original `.run.json` receipts, the completed training manifests and checkpoint registries. Use the same absolute retained checkpoint path for both tests, including the final evaluated snapshot, and pass the correct `--arm` and `--training-seed`. The separate final `adapter/` alias is not substituted for a registered snapshot. Inputs must be all 120 **clean confirmation** stories and complete natural/own/signed-null component panels on the primary band; keep per-layer diagnostics in the source file.
+
+```json
+{"checkpoint_selection": "final",
+ "corpus_manifest_path": "../data/generated/vast-20261029/manifest.json",
+ "base": {"evaluation_path": "base-test1.jsonl", "components_path": "base-test3.jsonl"},
+ "points": [{"arm": "reasoning_rl", "dataset": "clean", "runs": [
+   {"seed": 1, "evaluation_path": "seed1-test1.jsonl", "components_path": "seed1-test3.jsonl",
+    "training_manifest_path": "seed1/run_manifest.json",
+    "checkpoint_evaluations_path": "seed1/checkpoint_evaluations.jsonl"}]}]}
+```
+
+Expand that example to all four arms, both training datasets and seeds 1–3. Paths are relative to the manifest. Inference receipts must bind the actual adapter weights to the retained registry hash, and the supplied corpus manifest binds both confirmation inputs. `checkpoint_selection: "matched"` additionally verifies the development matching rule across all 24 runs; save that figure separately.
+
+```bash
+paper2 plot h3 --input runs/h3-final-manifest.json --output runs/h3-final.png
+```
+
+The horizontal axis is seven-unrewarded-view ordinary-target transfer; the vertical axis is the change in natural-minus-own joint event-rewrite correctness. Each axis averages seeds within story before 20,000 whole-story resamples. The sidecar preserves controls and provenance. The figure is descriptive: no fitted trend, correlation test or categorical assignment.

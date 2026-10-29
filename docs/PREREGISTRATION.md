@@ -1,6 +1,6 @@
 # Paper 2 preregistration — protocol v0.6
 
-Prospective specification, 29 October 2026. This document fixes estimands and analyses before research training; it does **not** record completed empirical gates. The source proposal remains the design authority. The named investigator freezes this document, corpus, training settings, editor plan and evidence hashes at the pilot review; dated amendments retain their predecessors and explain whether any relevant outcomes were inspected. Confirmation is measurement and reporting, not another numerical qualification exercise.
+Prospective specification, 29 October 2026. This document fixes estimands and analyses before research training; it does **not** record completed empirical gates. The revised 29 October proposal is retained in [source_proposal_revised_20261029.docx](source_proposal_revised_20261029.docx), with the original source preserved. The [prospective execution amendment](amendments/2026-10-29-execution.md) records the development capability comparison and H3 descriptive figure before research training. The named investigator freezes this document, corpus, training settings, editor plan and evidence hashes at the pilot review; dated amendments retain their predecessors and explain whether any relevant outcomes were inspected. Confirmation is measurement and reporting, not another numerical qualification exercise.
 
 ## Design and populations
 
@@ -25,6 +25,8 @@ Report separately: no-trace improvement on unrewarded belief-dependent views; in
 Primary mask: **every layer from 1 through the final layer**, excluding layer 0, resolved separately for each architecture. No activation patch precedes it. Swap critical-token pre-RoPE keys, values and residual outputs within each checkpoint, with complete own, signed-permutation and natural-donor panels on the identical mask. Per-layer results are descriptive; cross-model swaps are secondary and require identical token inputs.
 
 Score changed forecasts, intact forecasts and the complete eight-view event-rewrite pattern separately. For each component, report its natural-minus-own effect within checkpoint and the trained-minus-base change in that effect, for forecast probabilities and consequence-pattern correctness. Report signed-null contrasts alongside them. The same-band residual intervention is the positive control. Its estimate, interval and nulls inform interpretation; no automatic positive-effect test passes G4. A null key/value estimate without informative positive-control evidence remains inconclusive. Other Paper 1 forecast accounts are diagnostics, not alternative primary targets chosen after results.
+
+For the revised proposal’s descriptive cross-arm prediction, plot all eight arm-by-training-dataset combinations separately for K, V and residual. Use seven-unrewarded-view immediate accuracy transfer on the horizontal axis and the trained-minus-base change in natural-minus-own joint event-rewrite correctness on the vertical axis, both on the same clean confirmation stories. Show both whole-story intervals after averaging three seeds within story. Keep final and matched-checkpoint panels separate. No regression, correlation significance test or data-selected metric is used; see the execution amendment for the frozen display estimand.
 
 ## Matching, intervals and editing uncertainty
 

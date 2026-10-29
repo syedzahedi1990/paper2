@@ -1,2 +1,2 @@
 """Paper 2 research implementation. No experiment results are bundled."""
-__version__ = "0.6.1"
+__version__ = "0.6.2"

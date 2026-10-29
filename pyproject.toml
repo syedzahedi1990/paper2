@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "paper2-reasoning-rl"
-version = "0.6.1"
+version = "0.6.2"
 description = "Paper 2: What Does Reasoning RL Change in Belief Tracking?"
 requires-python = ">=3.10,<3.14"
 dependencies = ["numpy>=1.26,<3"]

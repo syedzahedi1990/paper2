@@ -144,6 +144,40 @@ def plot_quadrant(data, output):
     return _save(figure, output, data, plt)
 
 
+def plot_h3(data, output):
+    """Eight descriptive arm/dataset points for each of K, V and residual."""
+    from .h3 import COMPONENTS
+    from .training.config import ARMS
+    expected = {(arm, dataset) for arm in ARMS for dataset in ("clean", "shortcut")}
+    if data.get("figure") != "h3_descriptive_cross_arm":
+        raise ValueError("H3 plotting requires the verified descriptive cross-arm analysis")
+    panels = {component: [point for point in data.get("points", []) if point.get("component") == component]
+              for component in COMPONENTS}
+    if len(data.get("points", [])) != 24 or any(len(points) != 8 or {
+            (point["arm"], point["dataset"]) for point in points} != expected for points in panels.values()):
+        raise ValueError("H3 plotting requires all eight arm/dataset points for each component")
+    plt = _pyplot()
+    figure, axes = plt.subplots(1, 3, figsize=(16, 5), sharex=True, sharey=True, layout="constrained")
+    colors = {arm: plt.get_cmap("tab10")(index) for index, arm in enumerate(ARMS)}
+    for axis, component in zip(axes, COMPONENTS):
+        for point in panels[component]:
+            x, y = _measurement(point["x"], "H3 transfer"), _measurement(point["y"], "H3 component change")
+            if x is None or y is None:
+                raise ValueError("H3 plotting needs measured intervals on both axes for every point")
+            color = colors[point["arm"]]
+            axis.hlines(y["estimate"], *x["ci95"], color=color, linewidth=1)
+            axis.vlines(x["estimate"], *y["ci95"], color=color, linewidth=1)
+            axis.scatter(x["estimate"], y["estimate"], color=[color], s=40,
+                         marker="o" if point["dataset"] == "clean" else "^", label=point["label"], zorder=3)
+        axis.set(title={"k": "Keys", "v": "Values", "residual": "Residual stream"}[component],
+                 xlabel=data["x_label"])
+        axis.grid(alpha=.15)
+    axes[0].set_ylabel(data["y_label"])
+    axes[-1].legend(loc="best", fontsize="small", frameon=False)
+    figure.suptitle("Descriptive cross-arm H3 comparison · 95% story intervals")
+    return _save(figure, output, data, plt)
+
+
 def accuracy_reference_data(model_rows, audit, *, split=None, seed=2026, samples=20_000):
     """Pair clean direct-question model scores with measured symbolic references.
 

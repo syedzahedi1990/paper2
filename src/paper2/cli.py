@@ -142,8 +142,8 @@ def parser():
     for flag in ("base-reader", "trained-reader", "base-source", "trained-source"):
         analyze.add_argument("--" + flag)
     plot = sub.add_parser("plot", help="Render measured estimates and intervals without decision cutoffs")
-    plot.add_argument("kind", choices=["quadrant", "heuristics"])
-    plot.add_argument("--input", required=True, help="Quadrant manifest JSON or model result JSONL")
+    plot.add_argument("kind", choices=["quadrant", "heuristics", "h3"])
+    plot.add_argument("--input", required=True, help="Quadrant/H3 manifest JSON or model result JSONL")
     plot.add_argument("--audit", help="Required for heuristics: shortcut audit JSON")
     plot.add_argument("--split", choices=["train", "development", "confirmation"])
     plot.add_argument("--output", required=True, help="PNG, PDF or SVG; a JSON data sidecar is also saved")
@@ -266,6 +266,10 @@ def main(argv=None):
                                accuracy_reference_data, plot_accuracy_references)
         if args.kind == "quadrant":
             plot_quadrant(load_quadrant_data(args.input), args.output)
+        elif args.kind == "h3":
+            from .h3 import load_h3_data
+            from .plotting import plot_h3
+            plot_h3(load_h3_data(args.input), args.output)
         else:
             if not args.audit:
                 raise ValueError("Heuristic reference plots require --audit")
@@ -303,6 +307,16 @@ def main(argv=None):
             raise ValueError("Trained adapter inference requires --training-seed for valid confirmatory aggregation")
         if getattr(args, "donor_adapter", None) and not args.donor_model:
             raise ValueError("--donor-adapter needs --donor-model")
+        adapter_hashes = {}
+        for field in ("adapter", "donor_adapter"):
+            value = getattr(args, field, None)
+            if value:
+                directory = Path(value).resolve()
+                weights = directory / "adapter_model.safetensors"
+                if not weights.is_file():
+                    raise ValueError(f"--{field.replace('_', '-')} requires a retained local adapter with safetensors weights")
+                setattr(args, field, str(directory))
+                adapter_hashes[field] = file_digest(weights)
         backend = _backend(args)
         rows = read_jsonl(args.input)
         if command == "evaluate":
@@ -357,8 +371,13 @@ def main(argv=None):
                         **({"comparison_seed": args.comparison_seed} if command == "crossed" and args.comparison_seed is not None else {}),
                         **({"arm": args.arm} if args.arm else {})} for row in results]
         write_jsonl(args.output, results)
+        for field, expected_hash in adapter_hashes.items():
+            if file_digest(Path(getattr(args, field)) / "adapter_model.safetensors") != expected_hash:
+                raise ValueError("Adapter weights changed during inference; no completed receipt written")
         write_json(args.output + ".run.json", {"command": vars(args), "input_sha256": file_digest(args.input),
                    "output_sha256": file_digest(args.output), "checkpoint": backend.checkpoint_id,
+                   "adapter_sha256": adapter_hashes.get("adapter"),
+                   "donor_adapter_sha256": adapter_hashes.get("donor_adapter"),
                    "resolved_revision": getattr(backend.model.config, "_commit_hash", None),
                    "status": "completed"})
     return 0
