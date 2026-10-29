@@ -1,20 +1,20 @@
 {
   "code_test_config_hash_method": "SHA256 of compact sorted JSON mapping relative path to file SHA256 for src/tests/configs/scripts and pyproject.toml; excludes Python caches and egg-info",
-  "code_test_config_sha256": "d592c320920c2b812b297b4d01df3298bfa0ecadc338e66a0f330c21a22e03b2",
+  "code_test_config_sha256": "5d7fdbe22ede70bb0d00852e90964f4d9b2915fb083dbb800a507c0591f11374",
   "core_environment_without_torch": {
     "errors": 0,
     "failures": 0,
-    "passed": 275,
-    "seconds": 45.211,
+    "passed": 295,
+    "seconds": 44.527,
     "skipped": 12,
     "test_command": "/tmp/paper2-core-review/bin/python -m pytest -q",
-    "tests": 287
+    "tests": 307
   },
   "corpus_data_files_compared": 17,
   "corpus_hash": "0f6ef303cb86d2672fde8f7ac5c641e87b32c66b747245240efe08f49868a8f4",
   "corpus_rows_identical_to_v050": true,
   "dependency_check": "pip check: passed",
-  "documented_cli_commands_parsed": 42,
+  "documented_cli_commands_parsed": 44,
   "empirical_calibration_status": "requires_named_review",
   "empirical_gates_passed": [],
   "errors": 0,
@@ -33,16 +33,30 @@
     "upstream_revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5"
   },
   "paid_compute_run": false,
-  "passed": 311,
+  "passed": 331,
   "platform": "macOS-14.7.4-arm64-arm-64bit",
+  "prior_verifications_retained_from_v060": [
+    "Full corpus regeneration and 17-file byte comparison against v0.5",
+    "Full pinned-tokenizer corpus audit",
+    "27,416 official OpenToM prompt parity comparisons",
+    "Visual inspection of synthetic figure fixtures"
+  ],
   "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
   "python": "3.12.14",
+  "release_checks": [
+    "24 runnable prospective rate/schedule candidates with file hashes and unchanged exposure",
+    "G1 completeness and integrity for all three pilot arms",
+    "20,000-resample pointwise accuracy and paired baseline-to-final intervals",
+    "Flat learning curves remain valid measurements without a gain cutoff",
+    "Read-only G1 report preserves pending reviewer decision",
+    "Completed native/immediate receipts for all four tiny-model optimizer integrations"
+  ],
   "research_model_training_run": false,
-  "scope": "CPU unit and genuine tiny-Qwen integration, exact finite-population interval coverage, official OpenToM prompt/scorer fixtures, matching and control provenance, story/seed weighting and synthetic plot rendering/visual inspection. No pretrained research scores, editor-quality validation or empirical pilot decisions.",
-  "seconds": 54.688,
+  "scope": "CPU unit and genuine tiny-Qwen integration on all four arms; expanded development panel and all-arm G1 review integrity/intervals; regression coverage for prior analyses and plots. Corpus/tokenizer/full upstream prompt parity and manual figure inspection are retained v0.6.0 checks: their implementations and source artifacts are unchanged. No pretrained research scores, editor-quality validation or empirical pilot decisions.",
+  "seconds": 57.362,
   "skipped": 0,
   "test_command": ".venv/bin/python -m pytest -q",
-  "tests": 311,
+  "tests": 331,
   "validated_stack": {
     "accelerate": "1.8.1",
     "datasets": "3.6.0",
@@ -54,8 +68,8 @@
     "transformers": "4.53.2",
     "trl": "0.20.0"
   },
-  "version": "0.6.0",
-  "wheel": "paper2_reasoning_rl-0.6.0-py3-none-any.whl",
-  "wheel_sha256": "f5486b01df96e8fdd7abb57ace8c59aa4033da6e98f4f91c2faccfc9e7f962a0",
+  "version": "0.6.1",
+  "wheel": "paper2_reasoning_rl-0.6.1-py3-none-any.whl",
+  "wheel_sha256": "3ef49ae3307b8729e4d2ecc9e6519163d3e7c08dacf79316ef3bbfb6c900981b",
   "windows_ci": "Workflow configured; not claimed as executed locally"
 }

@@ -47,8 +47,12 @@ def parser():
     matrix = sub.add_parser("matrix")
     matrix.add_argument("--stage", choices=["pilot", "confirmatory"], required=True)
     matrix.add_argument("--output", required=True)
+    matrix.add_argument("--development-panel", action="store_true", help="Export the 24 preregistered pilot rate/schedule candidates without running them")
     gates = sub.add_parser("init-gates")
     gates.add_argument("--output", required=True)
+    g1 = sub.add_parser("verify-g1", help="Summarize complete all-arm learning evidence without approving the gate")
+    g1.add_argument("--review", required=True)
+    g1.add_argument("--output", required=True)
     freeze = sub.add_parser("freeze-calibration")
     for flag in ("review", "manifest", "settings", "evidence", "reviewer", "rationale"):
         freeze.add_argument("--" + flag, required=True)
@@ -176,9 +180,15 @@ def main(argv=None):
             raise ValueError("G2 tokenizer length matching failed; see audit output")
     elif command == "matrix":
         from .training.config import experiment_matrix
-        for config in experiment_matrix(args.stage):
-            name = f"{config.arm}_{config.dataset}_seed{config.seed}.json"
-            write_json(Path(args.output) / name, config.to_dict())
+        if args.development_panel:
+            if args.stage != "pilot":
+                raise ValueError("Development selection uses pilot data and arms only")
+            from .training.selection import export_development_panel
+            export_development_panel(args.output)
+        else:
+            for config in experiment_matrix(args.stage):
+                name = f"{config.arm}_{config.dataset}_seed{config.seed}.json"
+                write_json(Path(args.output) / name, config.to_dict())
     elif command == "init-gates":
         from .gates import initial_review
         if Path(args.output).exists():
@@ -187,6 +197,16 @@ def main(argv=None):
     elif command == "freeze-calibration":
         from .gates import freeze_calibration
         freeze_calibration(args.review, args.manifest, _json(args.settings), args.evidence, args.reviewer, args.rationale)
+    elif command == "verify-g1":
+        from .gates import verify_g1_learning_curves
+        review = _json(args.review)
+        if Path(args.output).resolve() == Path(args.review).resolve():
+            raise ValueError("G1 evidence output must not overwrite the review")
+        result = verify_g1_learning_curves(review["gates"]["G1"], Path(args.review).parent,
+                                          expected_manifest_sha256=review["calibration"]["manifest_sha256"])
+        write_json(args.output, {"schema_version": 1, "review_sha256": file_digest(args.review),
+                                "learning_curves": result,
+                                "note": "Evidence completeness only. No reviewer decision or numerical pass mark is inferred."})
     elif command in ("train", "profile"):
         from .training.config import load_config
         from .training.runner import run_training

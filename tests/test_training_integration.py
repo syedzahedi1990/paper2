@@ -70,12 +70,19 @@ def test_real_trl_optimizer_and_saved_adapter(tmp_path, arm):
             return original_generate(*args, **kwargs)
         model.generate = constrained_generate
     dev = [{**row, 'id': 'dev-' + row['id'], 'world_id': 'dev-' + row['world_id'], 'split': 'development'}
-           for row in rows()[:2]] if config.rl else None
+           for row in rows()[:2]]
     report = run_training(config, rows(), tmp_path, dev_rows=dev, synthetic_model=model, synthetic_tokenizer=tok,
                           trace_builder=lambda row: 'Alice believes ball box.')
     assert (tmp_path / 'adapter' / 'adapter_model.safetensors').exists()
     assert report['manifest']['status'] == 'complete'
     assert report['manifest']['trainable_parameters'] > 0
+    from paper2.io import file_digest
+    receipt = json.loads((tmp_path / 'g1_learning_evidence.json').read_text())
+    assert receipt['schema_version'] == 3 and receipt['run_status'] == 'complete'
+    assert receipt['run_identity']['arm'] == arm and receipt['synthetic'] is True
+    assert receipt['baseline']['step'] == 0 and receipt['latest']['step'] == 2
+    for artifact in receipt['artifacts'].values():
+        assert file_digest(tmp_path / artifact['path']) == artifact['sha256']
     compute = report['compute']
     assert compute['optimized_tokens'] > 0
     assert compute['checkpoint_seconds'] > 0

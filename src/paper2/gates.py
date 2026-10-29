@@ -28,6 +28,138 @@ def verify_evidence(gate, root):
             raise ValueError(f"Gate evidence missing or modified: {item['path']}")
 
 
+def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, seed=2026, samples=20_000):
+    """Validate every pilot arm and report pointwise/paired story intervals.
+
+    Intervals describe the fixed seed-1 pilot over sampled stories, not training
+    seed variability. They never impose an improvement or significance cutoff.
+    """
+    from .analysis import cluster_interval
+    from .io import read_jsonl
+    if type(samples) is not int or samples < 1:
+        raise ValueError("G1 bootstrap samples must be a positive integer")
+    entries = gate.get("learning_curves")
+    arms = {"reasoning_rl", "answer_rl", "label_sft"}
+    if (not isinstance(entries, list) or len(entries) != len(arms)
+            or any(not isinstance(item, dict) for item in entries)
+            or {item.get("arm") for item in entries} != arms):
+        raise ValueError("G1 requires learning_curves for all three pilot arms: reasoning_rl, answer_rl and label_sft")
+    results = {}
+    common_worlds = None
+    common_training_hash = None
+    common_revision = None
+    for entry in entries:
+        arm = entry["arm"]
+        if not isinstance(entry.get("interpretation"), str) or not entry["interpretation"].strip():
+            raise ValueError(f"G1 needs a reviewer interpretation for {arm}, including any lack of movement")
+        path = Path(root) / entry.get("path", "")
+        if not path.is_file() or file_digest(path) != entry.get("sha256"):
+            raise ValueError(f"G1 {arm} learning evidence missing or modified")
+        if not any((Path(root) / item["path"]).resolve() == path.resolve()
+                   and item["sha256"] == entry["sha256"] for item in gate.get("evidence", [])):
+            raise ValueError("G1 learning-curve files must be included in reviewed evidence")
+        receipt = json.loads(path.read_text())
+        if receipt.get("schema_version") != 3:
+            raise ValueError("G1 requires finalized schema-3 learning evidence with hashed run artifacts")
+        artifacts = {}
+        for name in ("manifest", "compute", "evaluations", "predictions"):
+            item = receipt.get("artifacts", {}).get(name, {})
+            artifact = path.parent / item.get("path", "")
+            if not artifact.is_file() or file_digest(artifact) != item.get("sha256"):
+                raise ValueError(f"G1 {arm} {name} artifact missing or modified")
+            artifacts[name] = (read_jsonl(artifact) if name in ("evaluations", "predictions")
+                               else json.loads(artifact.read_text()))
+        manifest, compute = artifacts["manifest"], artifacts["compute"]
+        config = manifest.get("config", {})
+        identity_keys = ("arm", "dataset", "seed", "model", "revision", "stage")
+        identity = {key: config.get(key) for key in identity_keys}
+        if (manifest.get("status") != "complete" or receipt.get("run_status") != "complete"
+                or manifest.get("synthetic_integration_test") is not False or receipt.get("synthetic") is not False
+                or identity != receipt.get("run_identity")
+                or identity["arm"] != arm or identity["dataset"] != "clean" or identity["seed"] != 1
+                or identity["stage"] != "pilot" or config.get("profile") is not False
+                or identity["model"] != "Qwen/Qwen2.5-3B-Instruct"):
+            raise ValueError(f"G1 {arm} must be a completed non-synthetic 3B clean seed-1 pilot run")
+        from .training.config import TrainingConfig
+        run_config = TrainingConfig(**config)
+        run_config.validate()
+        if common_revision is not None and identity["revision"] != common_revision:
+            raise ValueError("G1 pilot arms used different base-model revisions")
+        common_revision = identity["revision"]
+        if (expected_manifest_sha256 is not None
+                and manifest.get("corpus_manifest_sha256") != expected_manifest_sha256):
+            raise ValueError("G1 learning evidence belongs to a different frozen corpus")
+        if manifest.get("training_examples") != 2000 or compute.get("unique_worlds_seen") != 2000:
+            raise ValueError("G1 pilot curves must follow complete exposure to the 2,000-story pool")
+        training_hash = manifest.get("training_sha256")
+        if not isinstance(training_hash, str) or len(training_hash) != 64:
+            raise ValueError("G1 pilot run requires its training-data hash")
+        if common_training_hash is not None and training_hash != common_training_hash:
+            raise ValueError("G1 pilot arms used different training rows")
+        common_training_hash = training_hash
+        final = manifest.get("training_budget", {}).get("resolved_max_steps")
+        if (type(final) is not int or final != run_config.training_budget(2000)["resolved_max_steps"]
+                or compute.get("completed_optimizer_steps") != final):
+            raise ValueError("G1 curves require a completed optimizer budget and final checkpoint")
+        native = "native_reasoning" if arm == "reasoning_rl" else "native_answer"
+        schedules = {"immediate": run_config.immediate_evaluation_schedule(final),
+                     native: run_config.evaluation_schedule(final)}
+        expected = {(step, fmt) for fmt, steps in schedules.items() for step in steps}
+        metrics = artifacts["evaluations"]
+        if (len(metrics) != len(expected)
+                or {(row.get("step"), row.get("format")) for row in metrics} != expected):
+            raise ValueError("G1 requires complete scheduled native and immediate curves, including step 0 and final")
+        predictions = artifacts["predictions"]
+        grouped = {}
+        for row in predictions:
+            grouped.setdefault((row.get("step"), row.get("format")), []).append(row)
+        if set(grouped) != expected:
+            raise ValueError("G1 prediction panels differ from the scheduled learning curves")
+        for metric in metrics:
+            panel = grouped[(metric["step"], metric["format"])]
+            worlds = {row.get("world_id") for row in panel}
+            if (len(panel) != 120 or len(worlds) != 120 or None in worlds
+                    or len({row.get("id") for row in panel}) != 120 or metric.get("n") != 120):
+                raise ValueError("G1 requires complete 120-story development panels")
+            if common_worlds is not None and worlds != common_worlds:
+                raise ValueError("G1 learning curves must use the same development stories in every arm and checkpoint")
+            common_worlds = worlds
+            for row in [metric, *panel]:
+                if (any(row.get(key) != identity[key] for key in identity_keys if key != "stage")
+                        or row.get("split") != "development" or row.get("view") != "direct"
+                        or row.get("evaluation_dataset") != "clean"
+                        or row.get("checkpoint_id") != metric.get("checkpoint_id")
+                        or row.get("adapter_sha256") != metric.get("adapter_sha256")):
+                    raise ValueError("G1 learning-curve identity or checkpoint binding is inconsistent")
+            if any(type(row.get("correct")) is not bool for row in panel):
+                raise ValueError("G1 predictions require boolean correctness measurements")
+            accuracy = sum(row["correct"] for row in panel) / len(panel)
+            if (type(metric.get("accuracy")) not in (int, float)
+                    or not math.isfinite(metric["accuracy"]) or abs(metric["accuracy"] - accuracy) > 1e-12):
+                raise ValueError("G1 aggregate accuracy disagrees with the raw prediction panel")
+        by_key = {(row["step"], row["format"]): row for row in metrics}
+        if (receipt.get("primary_format") != native or receipt.get("baseline") != by_key[(0, native)]
+                or receipt.get("latest") != by_key[(final, native)]
+                or receipt.get("immediate_latest") != by_key[(final, "immediate")]):
+            raise ValueError("G1 receipt boundaries disagree with the complete learning curves")
+        curves = [{**metric, "accuracy_interval": cluster_interval(
+                    {row["world_id"]: [int(row["correct"])]
+                     for row in grouped[(metric["step"], metric["format"])]}, seed=seed, samples=samples)}
+                  for metric in metrics]
+        gains = {}
+        for fmt in (native, "immediate"):
+            before = {row["world_id"]: int(row["correct"]) for row in grouped[(0, fmt)]}
+            gains[fmt] = cluster_interval({row["world_id"]: [int(row["correct"]) - before[row["world_id"]]]
+                                          for row in grouped[(final, fmt)]}, seed=seed, samples=samples)
+        results[arm] = {"interpretation": entry["interpretation"], "curves": curves,
+                        "native_accuracy_gain": gains[native]["estimate"],
+                        "immediate_accuracy_gain": gains["immediate"]["estimate"],
+                        "native_gain_interval": gains[native], "immediate_gain_interval": gains["immediate"],
+                        "bootstrap_samples": samples, "bootstrap_seed": seed,
+                        "uncertainty": "95% pointwise whole-story bootstrap accuracy intervals and paired baseline-to-final gain intervals; fixed pilot seed 1, not training-seed uncertainty."}
+    return results
+
+
 def verify_g4_positive_control(gate, root, *, expected_test_layers=None):
     """Bind G4 to measured, nontrivial residual evidence, never a layer-0 replay.
 
@@ -114,6 +246,8 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if paid_required:
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
+        verify_g1_learning_curves(review["gates"]["G1"], path.parent,
+                                  expected_manifest_sha256=calibration["manifest_sha256"])
         settings = calibration.get("settings", {})
         _validate_frozen_g4_band(settings)
         test_layers = settings.get("g4_test_layers")

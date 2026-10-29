@@ -495,6 +495,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                 'supervision_mask': 'Completion tokens only; prompt and padding masked; injected cap delimiter masked for RL.',
                 'synthetic_integration_test': synthetic, 'resume_from_checkpoint': resume_from_checkpoint,
                 'corpus_manifest': str(corpus_manifest) if corpus_manifest else None,
+                'corpus_manifest_sha256': file_digest(corpus_manifest) if corpus_manifest else None,
                 'gate_file': str(gate_file) if gate_file else None, 'profile_report': str(profile_report) if profile_report else None,
                 'status': 'running'}
     (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
@@ -530,6 +531,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             ledger.peak_cuda_memory_bytes = max(ledger.peak_cuda_memory_bytes, int(torch.cuda.max_memory_allocated()))
         ledger.save(output / 'compute_report.json')
         (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
+        if (output / 'g1_learning_evidence.json').is_file():
+            finalize_g1_learning_evidence(output)
     report = ledger.to_dict()
     if config.profile or config.stage == 'profile':
         profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget,
@@ -541,3 +544,31 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                    'read_before_training': 'Review full-pool training, native development evaluation and retained snapshot storage for every arm; a short profile does not establish the pilot budget.'}
         (output / 'profile_report.json').write_text(json.dumps(profile, indent=2) + '\n')
     return {'manifest': manifest, 'compute': report, 'output_dir': str(output)}
+
+
+def finalize_g1_learning_evidence(output_dir):
+    """Bind every arm's final learning-curve receipt to its actual run artifacts.
+
+    A failed or synthetic run is still recorded honestly; G1's separate integrity
+    review requires completed production pilot evidence before confirmation.
+    """
+    from paper2.io import file_digest, write_json
+    output = Path(output_dir)
+    path = output / 'g1_learning_evidence.json'
+    evidence = json.loads(path.read_text())
+    manifest = json.loads((output / 'run_manifest.json').read_text())
+    config = manifest['config']
+    evidence.update({
+        'schema_version': 3,
+        'run_identity': {key: config[key] for key in ('arm', 'dataset', 'seed', 'model', 'revision', 'stage')},
+        'run_status': manifest['status'],
+        'synthetic': manifest['synthetic_integration_test'],
+        'artifacts': {name: {'path': filename, 'sha256': file_digest(output / filename)}
+                      for name, filename in (
+                          ('manifest', 'run_manifest.json'), ('compute', 'compute_report.json'),
+                          ('evaluations', 'checkpoint_evaluations.jsonl'),
+                          ('predictions', 'checkpoint_predictions.jsonl'))},
+        'note': 'Review each pilot arm in both its native format and immediate-answer format, including baseline and final; flat or negative gains are measurements, not automatic failures.',
+    })
+    write_json(path, evidence)
+    return evidence

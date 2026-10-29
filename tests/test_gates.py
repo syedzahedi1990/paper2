@@ -12,6 +12,7 @@ def reviewed(tmp_path, monkeypatch):
     # and stale approvals have dedicated tests below and in test_data_corpus.
     monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda _: None)
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control", lambda *_, **__: None)
+    monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", lambda *_, **__: None)
     evidence = tmp_path / "evidence.json"
     write_json(evidence, {"measured": True})
     review = initial_review()
@@ -187,3 +188,12 @@ def test_frozen_g4_pilot_band_must_start_at_one_and_be_complete(layers):
     from paper2.gates import _validate_frozen_g4_band
     with pytest.raises(ValueError, match='pilot test layers'):
         _validate_frozen_g4_band({'g4_layer_policy': 'all_after_embedding_layer', 'g4_test_layers': layers})
+
+
+def test_paid_runs_require_all_arm_g1_evidence(reviewed, monkeypatch):
+    gate, report, _, _ = reviewed
+    def reject(*_, **__):
+        raise ValueError("G1 missing label_sft learning curve")
+    monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", reject)
+    with pytest.raises(ValueError, match="G1 missing label_sft"):
+        assert_training_allowed({"stage": "confirmatory", "model": "Qwen/Qwen2.5-7B-Instruct"}, gate, report)

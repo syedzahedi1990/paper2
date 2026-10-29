@@ -23,6 +23,14 @@ Review base development direct accuracy and its whole-story interval against cha
 
 Freeze the final corpus configuration, the pretraining estimands and analyses in [PREREGISTRATION.md](PREREGISTRATION.md), the training settings/optional development-selection rule, editing model/procedure and Test 3 layer policy. The primary Test 3 band is every layer from 1 through the final model layer, resolved for each architecture; there is no layer-6 tuning choice. Freeze `g4_layer_policy: "all_after_embedding_layer"` and the pilot evidence list `g4_test_layers: [1, 2, …, 35]` (write every integer in the actual JSON). The pilot list binds 3B receipts; the policy resolves the 7B run to layers 1–27. Evidence and reviewer decisions must be tied to the frozen artifacts. Exact construction/length/entity matching, leakage, hashes and complete-panel checks remain mandatory integrity requirements. G0–G4 are pilot go/no-go reviews of whether measurements work; confirmation measures and reports the frozen estimands, including null or imprecise results.
 
+Before recording G0, freeze the choice of the reference configuration or the broader development panel described in [TRAINING.md](TRAINING.md). Zhong's rates are reference candidates because its LoRA/full-fine-tuning parameterization is unspecified. To prepare the panel without launching any runs:
+
+```bash
+paper2 matrix --stage pilot --development-panel --output runs/development-panel
+```
+
+This writes 24 runnable configurations and `selection_plan.json`, binding each configuration's file hash. Rates are ×1/3/10/30 the reference, with two fixed schedules. Include the plan in G0's frozen settings/evidence. Cost all 24 runs, their evaluations and retained adapters before choosing the panel; this is eight times the one-setting pilot run count. Use each exported configuration in the commands below with a separate output directory and base initialization. Retain every candidate's final native development score, interval, failures and cost. Apply the unchanged family selection and tie-breaking rule, document the result, and copy the selected family rate/schedule into the final configurations before freezing confirmation. The shipped pilot and confirmatory JSON files remain provisional ×1 references.
+
 After the investigator's actual G0 review:
 
 ```bash
@@ -51,9 +59,25 @@ paper2 train --config configs/pilot/reasoning_rl_clean_seed1.json \
   --output runs/pilot-reasoning-rl
 ```
 
-The shipped RL schedule measures immediate-answer accuracy and retains an adapter at steps 0, 50, …, 2,000 (41 checkpoints), while native traces run only at 0, 250, …, 2,000 (9 panels). SFT uses 25 steps for both formats; the short profile uses 5. Both schedules include off-interval final steps. The profile records separate native/immediate evaluation times and panel counts, generated tokens and snapshot bytes; combined-only older reports cannot authorize training. For 120 development stories, each default RL run makes 4,920 immediate forward passes and 1,080 native generations. The pilot retains 93 evaluated adapters and the confirmatory grid 624, in addition to rotating optimizer checkpoints and final adapters. The full-pool projection is for the same arm and model only. The proposal’s 15–25 hours for the whole pilot remains unverified. Account for all arms, sequential native evaluation, storage, control generation and later Tests 1–3 before approving compute.
+The shipped RL schedule measures immediate-answer accuracy and retains an adapter at steps 0, 50, …, 2,000 (41 checkpoints), while native traces run only at 0, 250, …, 2,000 (9 panels). SFT uses 25 steps for both formats; the short profile uses 5. Both schedules include off-interval final steps. The profile records separate native/immediate evaluation times and panel counts, generated tokens and snapshot bytes; combined-only older reports cannot authorize training. For 120 development stories, each default RL run makes 4,920 immediate forward passes and 1,080 native generations. The one-setting pilot retains 93 evaluated adapters (744 for the full development panel) and the confirmatory grid 624, in addition to rotating optimizer checkpoints and final adapters. The full-pool projection is for the same arm and model only. The proposal’s 15–25 hours for the whole pilot remains unverified. Account for all arms, sequential native evaluation, storage, control generation and later Tests 1–3 before approving compute.
 
 Repeat with the answer-RL and label-SFT pilot configurations, starting each from the base model. Keep the generated profile's memory/generation arrangement fixed. The profile adapter is not a starting checkpoint for any arm. Resume interruptions using `--resume-from-checkpoint runs/ARM/checkpoint-N` with the original output directory, configuration and data.
+
+G1 must review **all three pilot arms** in native and immediate formats, including step zero and the final step. Each completed run writes a schema-3 `g1_learning_evidence.json` binding the complete checkpoint summaries, predictions, manifest and compute report by hash. In `runs/review.json`, add one entry per arm to `gates.G1.learning_curves`, and include the same receipt paths/hashes in `gates.G1.evidence`. Paths are relative to the review file. Each learning-curve entry has this shape (replace the placeholders with actual hashes and review notes):
+
+```json
+{"arm": "label_sft", "path": "pilot-label-sft/g1_learning_evidence.json",
+ "sha256": "ACTUAL RECEIPT FILE SHA256",
+ "interpretation": "ACTUAL REVIEW OF THIS ARM'S LEARNING, UNCERTAINTY AND OPTIMIZATION"}
+```
+
+Supply the analogous entries for `reasoning_rl` and `answer_rl`. For a development panel, these are the selected family configurations; retain every other candidate's curves and selection record in the wider evidence. The reviewer considers weak or unstable learning in each arm and whether it would pull accuracy matching toward step zero. A flat curve is reportable evidence, with no minimum-gain rule. Check completeness and produce pointwise accuracy and paired baseline-to-final gain intervals before recording the named reviewer's decision:
+
+```bash
+paper2 verify-g1 --review runs/review.json --output runs/g1-learning-summary.json
+```
+
+This read-only check does not mark G1 passed. It verifies common 120-story development panels, complete schedules, completed runs and artifact hashes; its intervals use 20,000 whole-story resamples. The paid-run check requires these three receipts and interpretations alongside the named reviewer's actual G1 decision. Record that decision only after inspecting the evidence, including an arm that did not move.
 
 ## 3. Test 1 and matched accuracy
 
