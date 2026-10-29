@@ -1,4 +1,8 @@
-# Latest execution patch — 29 October 2026
+# Latest execution patch — cached GRPO generation
+
+**432 tests passed** on the pinned CPU stack after the generation-context repair. Ruff and `git diff --check` pass. [Patch evidence](validation/rollout-cache-validation.json) records the exact tested files, environment and scope. Tests reproduce the previous context loss in both Mistral and Qwen, verify cached decoding against full-prefix logits, and run genuine checkpointed GRPO updates with mode restoration and unchanged answer masking. The first disposable real-model profile is quarantined; a fresh-base replacement must establish resource feasibility. See the [technical correction](amendments/2026-10-29-rollout-cache.md).
+
+# Model-plan execution patch — 29 October 2026
 
 **422 tests passed** on the pinned CPU stack after the model-plan and Mistral architecture changes. Ruff and `git diff --check` pass. [Patch evidence](validation/model-amendment-validation.json) records the source hash and scope. This includes real tiny-Mistral optimizer/reload tests and validation against the three actual completed capability receipts; it does not establish real-model training feasibility or any later empirical gate.
 

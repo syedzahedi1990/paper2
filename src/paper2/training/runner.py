@@ -1,5 +1,6 @@
 """Runnable, pinned TRL 0.20 training backend. No downloads occur on import."""
 from __future__ import annotations
+from contextlib import contextmanager
 from dataclasses import fields
 from functools import partial
 import importlib.metadata
@@ -32,6 +33,26 @@ def _sync(torch: Any, device: Any) -> None:
     """Synchronize the device doing this run, not an unrelated available GPU."""
     if device.type == 'cuda':
         torch.cuda.synchronize(device)
+
+
+@contextmanager
+def _rollout_generation_mode(model: Any):
+    """Generate with native KV caching, then restore every module's prior mode.
+
+    In pinned TRL 0.20, unwrap_model_for_generation leaves training mode and
+    gradient checkpointing enabled. Transformers 4.53.2 checkpointed decoders
+    discard the supplied cache in training mode, even under torch.no_grad().
+    Generation can then decode from a single new token with an empty cache.
+    Eval mode bypasses that branch; checkpointing remains enabled for the
+    subsequent scoring/backward pass. Preserve mixed module modes on failure.
+    """
+    modes = tuple((module, module.training) for module in model.modules())
+    try:
+        model.eval()
+        yield
+    finally:
+        for module, training in modes:
+            module.training = training
 
 
 def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
@@ -94,7 +115,8 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
                     kwargs['logits_processor'] = LogitsProcessorList(existing + [cap])
                 _sync(torch, self.model.device)
                 start = time.perf_counter()
-                result = original_generate(*args, **kwargs)
+                with _rollout_generation_mode(self.model):
+                    result = original_generate(*args, **kwargs)
                 _sync(torch, self.model.device)
                 if training:
                     ledger.generation_seconds += time.perf_counter() - start
