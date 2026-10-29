@@ -240,6 +240,53 @@ def _upsert_jsonl(path: Path, records: list[dict[str, Any]], keys: tuple[str, ..
     temporary.replace(path)
 
 
+class _ProfileResourceSnapshots:
+    """Append-only resource observations; resumed checkpoint ledgers start segments.
+
+    A segment baseline follows its initial evaluation. Optimizer observations
+    precede evaluation at that step, so differences expose training timing
+    without attributing the final development panel to the last update. The
+    compute/profile report remains authoritative for final totals.
+    """
+    FIELDS = (
+        'generation_seconds', 'generation_and_scoring_seconds', 'update_seconds',
+        'optimizer_seconds', 'evaluation_seconds', 'evaluation_native_seconds',
+        'evaluation_immediate_seconds', 'generated_tokens', 'sampled_completions',
+        'evaluation_generated_tokens', 'evaluation_panels', 'evaluation_native_panels',
+        'evaluation_immediate_panels',
+    )
+
+    def __init__(self, path: Path, resume_from_checkpoint: str | None, *, synthetic: bool):
+        self.path = path
+        if path.exists() and not resume_from_checkpoint:
+            raise ValueError('Profile resource observations already exist; choose a new directory or resume explicitly')
+        previous = [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
+        self.segment_id = max((row['segment_id'] for row in previous), default=-1) + 1
+        self.resume_from_checkpoint = str(Path(resume_from_checkpoint).resolve()) if resume_from_checkpoint else None
+        self.synthetic = synthetic
+        self.start_step = None
+        self.last_step = None
+
+    def write(self, ledger: ComputeLedger, step: int, run_started: float) -> None:
+        baseline = self.start_step is None
+        if baseline:
+            self.start_step = step
+        elif step != self.last_step + 1:
+            raise ValueError('Profile resource observations require consecutive optimizer steps within a segment')
+        record = {
+            'schema_version': 1, 'segment_id': self.segment_id,
+            'segment_start_step': self.start_step, 'resume_from_checkpoint': self.resume_from_checkpoint,
+            'step': step, 'synthetic': self.synthetic,
+            'event': 'baseline_after_initial_evaluation' if baseline else 'optimizer_step_before_evaluation',
+            'elapsed_wall_seconds': time.perf_counter() - run_started,
+            **{f'cumulative_{name}': getattr(ledger, name) for name in self.FIELDS},
+            'cumulative_scoring_seconds': max(0.0, ledger.generation_and_scoring_seconds - ledger.generation_seconds),
+        }
+        with self.path.open('a') as stream:
+            stream.write(json.dumps(record, allow_nan=False) + '\n')
+        self.last_step = step
+
+
 def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], output_dir: str | Path,
                  *, gate_file: str | Path | None = None, profile_report: str | Path | None = None,
                  dev_rows: list[dict[str, Any]] | None = None, resume_from_checkpoint: str | None = None,
@@ -327,6 +374,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         if previous['config'] != config.to_dict() or previous['training_sha256'] != rows_digest(training_rows):
             raise ValueError('Resume config/data differ from the original run')
         prior_ledger = json.loads((checkpoint / 'paper2_compute.json').read_text())
+    resource_snapshots = (_ProfileResourceSnapshots(output / 'resource_steps.jsonl', resume_from_checkpoint,
+                                                    synthetic=synthetic)
+                          if config.profile or config.stage == 'profile' else None)
     tokenizer = synthetic_tokenizer or AutoTokenizer.from_pretrained(config.model, revision=config.revision)
     if tokenizer.eos_token_id is None:
         raise ValueError('Tokenizer needs an EOS token')
@@ -502,9 +552,13 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
 
         def on_train_begin(self, args, state, control, **kwargs):
             self.evaluate(state.global_step)
+            if resource_snapshots is not None:
+                resource_snapshots.write(ledger, state.global_step, trainer._paper2_run_started)
 
         def on_step_end(self, args, state, control, **kwargs):
             ledger.completed_optimizer_steps = state.global_step
+            if resource_snapshots is not None:
+                resource_snapshots.write(ledger, state.global_step, trainer._paper2_run_started)
             if state.global_step in evaluation_steps:
                 self.evaluate(state.global_step)
 

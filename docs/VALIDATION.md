@@ -1,4 +1,8 @@
-# Latest execution patch — cached GRPO generation
+# Latest execution patch — profile resource timing
+
+**438 tests passed** on the pinned CPU stack. Ruff and `git diff --check` pass. [Exact-file evidence](validation/resource-timing-validation.json) covers the profile-only timing journal: baseline after initial evaluation, one cumulative record before each step evaluation, and explicit append-only resume segments. Final reports retain all evaluation and saving costs. Ordinary candidate training is unchanged. The [resource extension decision](amendments/2026-10-29-resource-profiling-extension.md) activates the already-declared 25-update profiles; this certificate is not a scientific gate or full-study cost approval.
+
+# Cached GRPO generation correction
 
 **432 tests passed** on the pinned CPU stack after the generation-context repair. Ruff and `git diff --check` pass. [Patch evidence](validation/rollout-cache-validation.json) records the exact tested files, environment and scope. Tests reproduce the previous context loss in both Mistral and Qwen, verify cached decoding against full-prefix logits, and run genuine checkpointed GRPO updates with mode restoration and unchanged answer masking. The first disposable real-model profile is quarantined; a fresh-base replacement must establish resource feasibility. See the [technical correction](amendments/2026-10-29-rollout-cache.md).
 
