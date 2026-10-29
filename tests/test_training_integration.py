@@ -41,7 +41,7 @@ def test_real_trl_optimizer_and_saved_adapter(tmp_path, arm):
     from paper2.training.config import TrainingConfig
     from paper2.training.runner import run_training
     model, tok = tiny_fixture()
-    config = TrainingConfig(arm=arm, stage='confirmatory' if arm == 'reasoning_sft' else 'pilot', model='paper2-random-tiny-qwen', max_steps=2, batch_size=1,
+    config = TrainingConfig(arm=arm, stage='confirmatory' if arm == 'reasoning_sft' else 'pilot', model=model.config._name_or_path, max_steps=2, batch_size=1,
                             gradient_accumulation_steps=8, bf16=False, gradient_checkpointing=False,
                             save_steps=2, eval_steps=1, lora_rank=2, lora_alpha=4, beta=0.0)
     if config.rl:

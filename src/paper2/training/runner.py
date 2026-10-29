@@ -252,10 +252,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             profile = json.loads(Path(profile_report).read_text())
             if profile.get('synthetic') or profile.get('gpu_seconds', 0) <= 0:
                 raise ValueError('Production training requires a real GPU profiling report')
-            arrangement_keys = ('group_size', 'trace_cap', 'lora_rank', 'lora_alpha', 'lora_modules', 'batch_size', 'gradient_accumulation_steps', 'max_prompt_length', 'load_in_4bit', 'attn_implementation', 'bf16', 'gradient_checkpointing')
+            arrangement_keys = ('model', 'revision', 'arm', 'model_amendment_sha256', 'group_size', 'trace_cap', 'lora_rank', 'lora_alpha', 'lora_modules', 'batch_size', 'gradient_accumulation_steps', 'max_prompt_length', 'load_in_4bit', 'attn_implementation', 'bf16', 'gradient_checkpointing')
             mismatch = [key for key in arrangement_keys if profile.get('config', {}).get(key) != config.to_dict()[key]]
-            if profile.get('config', {}).get('model') == config.model and profile.get('config', {}).get('revision') != config.revision:
-                mismatch.append('revision')
             if mismatch and not config.profile:
                 raise ValueError(f'Training differs from the profiled arrangement: {mismatch}; reprofile before continuing')
         relative = f'supervision/{config.dataset}_reasoning_sft.jsonl' if config.arm == 'reasoning_sft' else f'training/{config.dataset}.jsonl'
@@ -332,6 +330,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                                                    bnb_4bit_use_double_quant=True)
             load_kwargs['device_map'] = {'': 0}
         model = AutoModelForCausalLM.from_pretrained(config.model, **load_kwargs)
+        from .config import MODEL_LAYERS
+        if model.config.num_hidden_layers != MODEL_LAYERS[config.model]:
+            raise ValueError('Loaded model geometry differs from the immutable model profile')
     model.config.use_cache = False
     lora = LoraConfig(r=config.lora_rank, lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout,
                       bias='none', target_modules=list(config.lora_modules), task_type='CAUSAL_LM')

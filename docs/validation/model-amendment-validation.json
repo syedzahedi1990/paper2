@@ -1,0 +1,32 @@
+{
+  "code_test_config_sha256": "532d66865296c39174565a73eaf3f278dcea6612c579494541f8008b8097ecc6",
+  "command": ".venv/bin/python -m pytest -q",
+  "failures": 0,
+  "git_diff_check": "passed",
+  "passed": 422,
+  "prior_release_evidence": "software-validation.json remains the historical v0.6.3 certificate; its core/no-torch count and wheel hashes are not asserted for this patch",
+  "python": "3.12.14",
+  "real_receipt_check": "All three completed 120-story capability panels validated against actual frozen development inputs, canonical digests and common implementation hashes",
+  "ruff": "passed: src tests scripts",
+  "scope": "Combined model-plan integrity and Mistral architecture patch; CPU tests, not scientific gates or real training",
+  "seconds": 75.11,
+  "skipped": 0,
+  "tests_include": [
+    "Mistral nonsquare attention projection geometry and pre-RoPE hooks",
+    "Three genuine tiny-Mistral TRL optimizer integrations and adapter reload parity",
+    "Amendment model/revision/arm identity and corpus/evidence binding",
+    "Explicit production-profile step budgets and confirmation bootstrap scope"
+  ],
+  "validation_utc": "2026-10-29",
+  "versions": {
+    "accelerate": "1.8.1",
+    "datasets": "3.6.0",
+    "numpy": "2.5.4",
+    "peft": "0.16.0",
+    "pytest": "8.4.2",
+    "torch": "2.7.1",
+    "transformers": "4.53.2",
+    "trl": "0.20.0"
+  },
+  "warnings": 26
+}

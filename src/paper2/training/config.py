@@ -9,7 +9,10 @@ ARMS = ('label_sft', 'reasoning_sft', 'answer_rl', 'reasoning_rl')
 MODEL_REVISIONS = {
     'Qwen/Qwen2.5-3B-Instruct': 'aa8e72537993ba99e69dfaafa59ed015b17504d1',
     'Qwen/Qwen2.5-7B-Instruct': 'a09a35458c702b33eeacc393d103063234e8bc28',
+    'mistralai/Mistral-Small-24B-Instruct-2501': '9527884be6e5616bdd54de542f9ae13384489724',
 }
+MODEL_LAYERS = {'Qwen/Qwen2.5-3B-Instruct': 36, 'Qwen/Qwen2.5-7B-Instruct': 28,
+                'mistralai/Mistral-Small-24B-Instruct-2501': 40}
 LORA_MODULES = ('q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj')
 
 
@@ -52,6 +55,10 @@ class TrainingConfig:
     attn_implementation: str = 'sdpa'
     trace_source: str = 'paper1_symbolic_oracle_v1'
     profile: bool = False
+    # A capability amendment binds both stages; it is checked against frozen G0.
+    model_amendment_sha256: str | None = None
+    # Only an initial confirmatory profile may borrow the calibrated pilot profile.
+    target_profile_bootstrap: bool = False
 
     def __post_init__(self) -> None:
         if self.revision is None:
@@ -143,11 +150,23 @@ class TrainingConfig:
         if self.stage in ('pilot', 'profile') and (self.dataset != 'clean' or self.seed != 1 or self.arm == 'reasoning_sft'):
             raise ValueError('Pilot uses clean data, seed 1, reasoning RL/answer RL/label SFT only')
         if not synthetic:
+            if (self.profile or self.stage == 'profile') and self.max_steps is None:
+                raise ValueError('Production profiling requires an explicit positive max_steps budget')
             expected = 'Qwen/Qwen2.5-7B-Instruct' if self.stage == 'confirmatory' else 'Qwen/Qwen2.5-3B-Instruct'
-            if self.model != expected:
+            if self.model not in MODEL_REVISIONS:
+                raise ValueError('Training requires an explicitly supported immutable model profile')
+            if self.model != expected and self.model_amendment_sha256 is None:
                 raise ValueError(f'{self.stage} requires {expected}; capability exceptions need a protocol amendment')
-            if len(self.revision) != 40 or any(c not in '0123456789abcdef' for c in self.revision):
+            if not isinstance(self.revision, str) or len(self.revision) != 40 or any(c not in '0123456789abcdef' for c in self.revision):
                 raise ValueError('Production model revisions must be immutable 40-character commit hashes')
+            if self.revision != MODEL_REVISIONS[self.model]:
+                raise ValueError('Model revision differs from the supported immutable model profile')
+        if self.model_amendment_sha256 is not None and (
+                not isinstance(self.model_amendment_sha256, str) or len(self.model_amendment_sha256) != 64
+                or any(c not in '0123456789abcdef' for c in self.model_amendment_sha256)):
+            raise ValueError('model_amendment_sha256 must be an immutable SHA256 digest')
+        if self.target_profile_bootstrap and (self.stage != 'confirmatory' or not self.profile):
+            raise ValueError('target_profile_bootstrap is only allowed for an explicit confirmatory profile')
         if self.stage == 'confirmatory' and self.seed not in (1, 2, 3):
             raise ValueError('Confirmatory seeds are 1, 2, 3')
         if self.arm == 'reasoning_sft' and self.trace_source != 'paper1_symbolic_oracle_v1':

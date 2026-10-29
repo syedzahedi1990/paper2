@@ -47,7 +47,7 @@ def full_pool_projection(config: TrainingConfig, training_examples: int, develop
     deliberately leave the total estimate unset.
     """
     target = replace(config, stage='pilot' if config.stage == 'profile' else config.stage,
-                     profile=False, max_steps=None, num_train_epochs=1.0,
+                     profile=False, target_profile_bootstrap=False, max_steps=None, num_train_epochs=1.0,
                      eval_steps=250 if config.rl else 25, immediate_eval_steps=50 if config.rl else 25, save_steps=50)
     plan = resource_plan(target, training_examples, development_examples, delimiter_tokens, synthetic=synthetic)
     completed_steps = measured.get('completed_optimizer_steps', 0)

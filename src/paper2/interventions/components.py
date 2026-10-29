@@ -1,4 +1,4 @@
-"""Critical-token swaps through native Hugging Face Qwen2 forward passes.
+"""Critical-token swaps through native Hugging Face Qwen2/Mistral forward passes.
 
 K/V payloads are taken after the projection (including bias and active LoRA)
 and before native RoPE / grouped-query replication. A key is therefore rotated
@@ -152,10 +152,10 @@ def signed_permutation_delta(recipient: Any, donor: Any, *, seed: int) -> tuple[
 
 
 class ComponentInterventionEngine:
-    """Capture and swap Qwen2.5 components without replacing attention code.
+    """Capture and swap Qwen2.5/Mistral components through native attention.
 
     Pass an eval-mode ``AutoModelForCausalLM`` or a PEFT model whose underlying
-    model_type is qwen2. Captures are bound to model instance, active adapter,
+    model_type is qwen2 or mistral. Captures are bound to model instance, active adapter,
     parameter versions, token prefix, and payload checksums. Do not share one
     engine concurrently between threads.
     """
@@ -166,15 +166,31 @@ class ComponentInterventionEngine:
         self.model, self.checkpoint_id = model, checkpoint_id
         base = model.get_base_model() if hasattr(model, "get_base_model") else model
         config = base.config
-        if config.model_type != "qwen2":
-            raise ValueError("This audited adapter supports Qwen2/Qwen2.5 only")
+        if config.model_type not in ("qwen2", "mistral"):
+            raise ValueError("This audited adapter supports Qwen2/Qwen2.5 and Mistral only")
         self.layers = base.model.layers
         self.n_kv = config.num_key_value_heads
         self.n_q = config.num_attention_heads
         self.width = config.hidden_size
-        self.head_dim = getattr(config, "head_dim", None) or self.width // self.n_q
-        if self.n_q % self.n_kv or self.head_dim * self.n_q != self.width:
+        if any(type(n) is not int or n <= 0 for n in (self.n_kv, self.n_q, self.width)):
             raise ValueError("Unsupported attention/GQA geometry")
+        self.head_dim = getattr(config, "head_dim", None) or self.width // self.n_q
+        dimensions = (self.n_kv, self.n_q, self.width, self.head_dim, config.num_hidden_layers)
+        if any(type(n) is not int or n <= 0 for n in dimensions) or self.n_q % self.n_kv:
+            raise ValueError("Unsupported attention/GQA geometry")
+        if len(self.layers) != config.num_hidden_layers:
+            raise ValueError("Native layer count disagrees with model configuration")
+        # Mistral Small 24B has a 5120-wide residual stream but a 4096-wide
+        # projected query stream (32 heads x 128). Validate the native maps;
+        # hidden_size == query-heads * head_dim is not an architectural rule.
+        projected_widths = {"q": self.n_q * self.head_dim,
+                            "k": self.n_kv * self.head_dim, "v": self.n_kv * self.head_dim}
+        for index, block in enumerate(self.layers):
+            for name, output_width in projected_widths.items():
+                self._validate_projection(getattr(block.self_attn, name + "_proj"),
+                                          self.width, output_width, f"{index}:{name}_proj")
+            self._validate_projection(block.self_attn.o_proj, self.n_q * self.head_dim,
+                                      self.width, f"{index}:o_proj")
         self.geometry = (len(self.layers), self.width, self.n_kv, self.head_dim)
         self.architecture_sha256 = _digest_json({name: getattr(config, name, None) for name in (
             "model_type", "vocab_size", "hidden_size", "intermediate_size", "num_hidden_layers",
@@ -185,13 +201,28 @@ class ComponentInterventionEngine:
         self._active = False
         self._assert_eval()
 
+    @staticmethod
+    def _validate_projection(module: Any, input_width: int, output_width: int, name: str) -> None:
+        # Validate the underlying dense map while leaving hooks on the outer
+        # projection, so an active PEFT adapter remains part of the payload.
+        base = module.get_base_layer() if hasattr(module, "get_base_layer") else module
+        shape = tuple(getattr(getattr(base, "weight", None), "shape", ()))
+        if (getattr(base, "in_features", None) != input_width or
+                getattr(base, "out_features", None) != output_width or
+                shape != (output_width, input_width)):
+            raise ValueError(f"Native projection geometry disagrees with configuration: {name}")
+
     def _assert_eval(self) -> None:
         if any(module.training for module in self.model.modules()):
             raise ValueError("Component interventions require model.eval() (dropout disabled)")
 
     def _signature(self) -> tuple[Any, ...]:
         adapter = repr(getattr(self.model, "active_adapters", None))
-        return (adapter, tuple((name, id(p), p._version) for name, p in self.model.named_parameters()))
+        adapter_state = tuple((name, repr(getattr(module, "active_adapters", None)),
+                               bool(module.disable_adapters), repr(getattr(module, "merged_adapters", None)))
+                              for name, module in self.model.named_modules() if hasattr(module, "disable_adapters"))
+        return (adapter, adapter_state,
+                tuple((name, id(p), p._version) for name, p in self.model.named_parameters()))
 
     def _sites(self, sites: Iterable[Site]) -> tuple[Site, ...]:
         result = tuple(sites)

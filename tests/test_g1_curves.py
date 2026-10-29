@@ -185,3 +185,40 @@ def test_g1_gain_interval_tracks_paired_changes_not_just_marginal_accuracies(g1_
     assert result['native_gain_interval']['estimate'] == 0
     assert result['native_gain_interval']['ci95'][0] < 0 < result['native_gain_interval']['ci95'][1]
     assert result['immediate_gain_interval']['ci95'] == [0., 0.]
+
+
+def test_g1_uses_declared_pilot_model_for_all_three_arms(g1_panel, monkeypatch):
+    from paper2.training.config import MODEL_REVISIONS
+    gate, root = g1_panel
+    model = 'Qwen/Qwen2.5-7B-Instruct'
+    identity = {'model': model, 'revision': MODEL_REVISIONS[model]}
+    amendment_hash = 'a' * 64
+    plan = {'pilot': identity, 'confirmatory': identity, 'amendment_sha256': amendment_hash}
+    # Evidence-file integrity is tested in test_model_plan. Here exercise all G1
+    # production structure checks under a validated alternative model identity.
+    monkeypatch.setattr('paper2.training.model_plan.calibrated_model_plan', lambda *_: plan)
+    for arm in ('reasoning_rl', 'answer_rl', 'label_sft'):
+        output = root / arm
+        path = output / 'run_manifest.json'
+        manifest = json.loads(path.read_text())
+        manifest['config'].update({**identity, 'model_amendment_sha256': amendment_hash})
+        write_json(path, manifest)
+        for filename in ('checkpoint_evaluations.jsonl', 'checkpoint_predictions.jsonl'):
+            write_jsonl(output / filename, [{**row, **identity} for row in read_jsonl(output / filename)])
+        path = output / 'g1_learning_evidence.json'
+        receipt = json.loads(path.read_text())
+        for key in ('baseline', 'latest', 'immediate_latest'):
+            receipt[key].update(identity)
+        write_json(path, receipt)
+        rebind(gate, root, arm)
+    result = verify_g1_learning_curves(gate, root, samples=100)
+    assert set(result) == {'reasoning_rl', 'answer_rl', 'label_sft'}
+    assert all(item['native_accuracy_gain'] == 0 for item in result.values())
+    # A different model or amendment in only one arm never becomes a valid G1.
+    path = root / 'label_sft' / 'run_manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['config']['model_amendment_sha256'] = 'b' * 64
+    write_json(path, manifest)
+    rebind(gate, root)
+    with pytest.raises(ValueError, match='frozen model plan'):
+        verify_g1_learning_curves(gate, root, samples=100)

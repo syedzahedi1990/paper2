@@ -4,13 +4,19 @@ import pytest
 
 from paper2.gates import assert_training_allowed, freeze_calibration, initial_review
 from paper2.io import file_digest, write_json
+from paper2.training.config import TrainingConfig
+
+
+def request(stage='pilot', **changes):
+    model = 'Qwen/Qwen2.5-7B-Instruct' if stage == 'confirmatory' else 'Qwen/Qwen2.5-3B-Instruct'
+    return TrainingConfig(stage=stage, model=model, **changes).to_dict()
 
 
 @pytest.fixture
 def reviewed(tmp_path, monkeypatch):
     # These unit cases isolate cost/profile/evidence policy. Real corpus readiness
     # and stale approvals have dedicated tests below and in test_data_corpus.
-    monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda _: None)
+    monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", lambda *_, **__: None)
     evidence = tmp_path / "evidence.json"
@@ -24,7 +30,7 @@ def reviewed(tmp_path, monkeypatch):
                                "gbp_limit": 500, "exchange_rate_date": "2026-10-28"}
     gate = tmp_path / "gates.json"
     write_json(gate, review)
-    profile = {"status": "completed", "synthetic": False, "config": {"arm": "reasoning_rl"}, "generation_seconds": 2, "update_seconds": 1,
+    profile = {"status": "completed", "synthetic": False, "config": TrainingConfig(stage="profile").to_dict(), "generation_seconds": 2, "update_seconds": 1,
                "checkpoint_seconds": .1, "peak_cuda_memory_bytes": 1000, "generated_tokens": 16,
                "sampled_completions": 8, "generation_tokens_per_second": 8, "truncation_rate": 0,
                "evaluation_seconds": 2, "evaluation_panels": 2, "evaluation_native_generations": 240,
@@ -40,22 +46,22 @@ def test_pilot_uses_measured_profile_and_does_not_need_paid_approval(reviewed):
     gate, report, review, profile = reviewed
     review["paid_compute"]["approved"] = False
     write_json(gate, review)
-    assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+    assert_training_allowed(request("pilot"), gate, report)
     profile["synthetic"] = True
     write_json(report, profile)
     with pytest.raises(ValueError, match="synthetic"):
-        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+        assert_training_allowed(request("pilot"), gate, report)
 
 
-def test_7b_profiling_cannot_bypass_paid_gate(reviewed):
+def test_unamended_7b_cannot_be_called_a_pilot_profile(reviewed):
     gate, report, review, _ = reviewed
-    assert_training_allowed({"stage": "profile", "model": "Qwen2.5-3B-Instruct"}, gate, None)
-    with pytest.raises(ValueError, match="profiling report"):
-        assert_training_allowed({"stage": "profile", "model": "Qwen2.5-7B-Instruct"}, gate, None)
+    assert_training_allowed(request("profile"), gate, None)
+    with pytest.raises(ValueError, match="frozen model plan"):
+        assert_training_allowed({**request('profile'), 'model': 'Qwen/Qwen2.5-7B-Instruct'}, gate, None)
     review["paid_compute"]["approved"] = False
     write_json(gate, review)
     with pytest.raises(ValueError, match="explicit cost approval"):
-        assert_training_allowed({"stage": "profile", "model": "Qwen2.5-7B-Instruct"}, gate, report)
+        assert_training_allowed(request('confirmatory', profile=True, target_profile_bootstrap=True), gate, report)
 
 
 @pytest.mark.parametrize("estimate", [float("nan"), float("inf"), -1, 0, 501])
@@ -64,18 +70,18 @@ def test_nonfinite_negative_and_overbudget_estimates_fail_closed(reviewed, estim
     review["paid_compute"]["estimated_gbp"] = estimate
     gate.write_text(json.dumps(review))  # Deliberately malformed external JSON.
     with pytest.raises(ValueError, match="finite positive|ceiling"):
-        assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
+        assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
 
 
 def test_evidence_tampering_and_empty_profiles_are_rejected(reviewed):
     gate, report, review, _ = reviewed
     write_json(report, {"status": "completed", "synthetic": False})
     with pytest.raises(ValueError, match="measurement"):
-        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+        assert_training_allowed(request("pilot"), gate, report)
     evidence = gate.parent / review["gates"]["G0"]["evidence"][0]["path"]
     evidence.write_text("changed")
     with pytest.raises(ValueError, match="modified"):
-        assert_training_allowed({"stage": "profile", "model": "Qwen2.5-3B-Instruct"}, gate, None)
+        assert_training_allowed(request("profile"), gate, None)
 
 
 def test_freeze_requires_named_review_before_writing(tmp_path):
@@ -91,12 +97,12 @@ def test_old_profile_cannot_omit_development_costs_or_snapshot_storage(reviewed)
     profile.pop("evaluation_seconds")
     write_json(report, profile)
     with pytest.raises(ValueError, match="evaluation_seconds"):
-        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+        assert_training_allowed(request("pilot"), gate, report)
     profile["evaluation_seconds"] = 2
     profile["max_evaluated_adapter_bytes"] = 0
     write_json(report, profile)
     with pytest.raises(ValueError, match="retained-adapter storage"):
-        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+        assert_training_allowed(request("pilot"), gate, report)
 
 
 def test_old_frozen_lineage_cannot_authorize_training(tmp_path):
@@ -111,7 +117,7 @@ def test_paid_gate_enforces_nontrivial_residual_review(reviewed, monkeypatch):
         raise ValueError("G4 rejects layer-zero-only positive-control evidence")
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control", reject)
     with pytest.raises(ValueError, match="G4 rejects layer-zero"):
-        assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
+        assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
 
 
 def test_paid_control_is_bound_to_frozen_band(reviewed, monkeypatch):
@@ -119,12 +125,12 @@ def test_paid_control_is_bound_to_frozen_band(reviewed, monkeypatch):
     received = []
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control",
                         lambda *_, expected_test_layers: received.append(expected_test_layers))
-    assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
+    assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
     assert received == [list(range(1, 36))]
     review["calibration"]["settings"].pop("g4_test_layers")
     write_json(gate, review)
     with pytest.raises(ValueError, match="declared in frozen"):
-        assert_training_allowed({"stage": "confirmatory", "model": "Qwen2.5-7B-Instruct"}, gate, report)
+        assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
 
 
 def test_combined_evaluation_profile_cannot_hide_native_cost(reviewed):
@@ -132,7 +138,7 @@ def test_combined_evaluation_profile_cannot_hide_native_cost(reviewed):
     profile.pop("evaluation_native_seconds")
     write_json(report, profile)
     with pytest.raises(ValueError, match="evaluation_native_seconds"):
-        assert_training_allowed({"stage": "pilot", "model": "Qwen2.5-3B-Instruct"}, gate, report)
+        assert_training_allowed(request("pilot"), gate, report)
 
 
 def test_g0_rejects_smoke_corpus_even_with_named_reviewer(tmp_path):
@@ -175,12 +181,12 @@ def test_frozen_g4_policy_is_architecture_relative_and_pilot_list_is_not_reused_
     received = []
     monkeypatch.setattr('paper2.gates.verify_g4_positive_control',
                         lambda *_, expected_test_layers: received.append(expected_test_layers))
-    assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct'}, gate, report)
+    assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
     assert received == [list(range(1, 36))]  # Check the reviewed 3B pilot evidence.
     review['calibration']['settings']['g4_layer_policy'] = 'same_numeric_band_for_all_models'
     write_json(gate, review)
     with pytest.raises(ValueError, match='g4_layer_policy'):
-        assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct'}, gate, report)
+        assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
 
 
 @pytest.mark.parametrize('layers', [[0, 1], [2, 3], [1, 3], [1, True], []])
@@ -196,7 +202,7 @@ def test_paid_runs_require_all_arm_g1_evidence(reviewed, monkeypatch):
         raise ValueError("G1 missing label_sft learning curve")
     monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", reject)
     with pytest.raises(ValueError, match="G1 missing label_sft"):
-        assert_training_allowed({"stage": "confirmatory", "model": "Qwen/Qwen2.5-7B-Instruct"}, gate, report)
+        assert_training_allowed(request("confirmatory", profile=True, target_profile_bootstrap=True), gate, report)
 
 
 def _sft_profile(profile):
@@ -208,15 +214,14 @@ def _sft_profile(profile):
     profile.update({key: values[key] for key in (
         'generation_seconds', 'generated_tokens', 'sampled_completions', 'generation_tokens_per_second',
         'supervised_tokens', 'optimized_tokens', 'prompt_exposures')})
-    profile['config'] = {'arm': 'label_sft'}
+    profile['config']['arm'] = 'label_sft'
     return profile
 
 
 def test_genuine_sft_profile_allows_training_without_fabricated_rollout_counts(reviewed):
     gate, report, _, profile = reviewed
     write_json(report, _sft_profile(profile))
-    result = assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
-                                      'arm': 'label_sft'}, gate, report)
+    result = assert_training_allowed(request(arm='label_sft'), gate, report)
     assert result['calibration']['frozen']
 
 
@@ -227,8 +232,7 @@ def test_rl_profile_still_requires_actual_training_rollouts(reviewed, field, val
     profile[field] = value
     write_json(report, profile)
     with pytest.raises(ValueError, match='RL profiling'):
-        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
-                                 'arm': 'reasoning_rl'}, gate, report)
+        assert_training_allowed(request(arm='reasoning_rl'), gate, report)
 
 
 @pytest.mark.parametrize('field', ['supervised_tokens', 'optimized_tokens', 'prompt_exposures', 'update_seconds'])
@@ -237,18 +241,15 @@ def test_sft_profile_requires_real_supervised_optimization(reviewed, field):
     _sft_profile(profile)[field] = 0
     write_json(report, profile)
     with pytest.raises(ValueError, match='optimization'):
-        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
-                                 'arm': 'label_sft'}, gate, report)
+        assert_training_allowed(request(arm='label_sft'), gate, report)
 
 
 def test_full_training_cannot_use_another_arms_profile(reviewed):
     gate, report, _, _ = reviewed
-    with pytest.raises(ValueError, match='same arm'):
-        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
-                                 'arm': 'answer_rl'}, gate, report)
+    with pytest.raises(ValueError, match='same model, revision, arm'):
+        assert_training_allowed(request(arm='answer_rl'), gate, report)
 
 
 def test_target_size_bootstrap_profile_can_use_prior_pilot_arm_profile(reviewed):
     gate, report, _, _ = reviewed
-    assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct',
-                             'arm': 'reasoning_sft', 'profile': True}, gate, report)
+    assert_training_allowed(request('confirmatory', arm='reasoning_sft', profile=True, target_profile_bootstrap=True), gate, report)

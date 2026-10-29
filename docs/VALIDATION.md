@@ -1,3 +1,9 @@
+# Latest execution patch — 29 October 2026
+
+**422 tests passed** on the pinned CPU stack after the model-plan and Mistral architecture changes. Ruff and `git diff --check` pass. [Patch evidence](validation/model-amendment-validation.json) records the source hash and scope. This includes real tiny-Mistral optimizer/reload tests and validation against the three actual completed capability receipts; it does not establish real-model training feasibility or any later empirical gate.
+
+The following release certificate is retained as historical evidence for v0.6.3. Its no-torch counts and wheel checksum have not been regenerated for this execution patch.
+
 # Validation status — version 0.6.3
 
 **382 tests passed**, with zero failures or skips, on Python 3.12.14 and the pinned CPU training stack. Without PyTorch, **345 tests passed** with 13 expected optional-model skips. Both environments include the optional plotting dependency. Ruff, dependency checks, wheel build and all **45 documented CLI commands** passed. [Software evidence](validation/software-validation.json) records versions, counts and hashes. This release was tested on macOS; Windows CI is configured, not claimed as locally executed.

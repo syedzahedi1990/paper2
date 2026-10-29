@@ -28,7 +28,7 @@ def verify_evidence(gate, root):
             raise ValueError(f"Gate evidence missing or modified: {item['path']}")
 
 
-def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, seed=2026, samples=20_000):
+def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, calibration=None, seed=2026, samples=20_000):
     """Validate every pilot arm and report pointwise/paired story intervals.
 
     Intervals describe the fixed seed-1 pilot over sampled stories, not training
@@ -36,6 +36,12 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, seed
     """
     from .analysis import cluster_interval
     from .io import read_jsonl
+    from .training.model_plan import calibrated_model_plan
+    plan = calibrated_model_plan(calibration or {}, root)
+    expected_model = plan['pilot']
+    if (calibration is not None and expected_manifest_sha256 is not None
+            and calibration.get('manifest_sha256') != expected_manifest_sha256):
+        raise ValueError('G1 calibration and requested corpus manifest differ')
     if type(samples) is not int or samples < 1:
         raise ValueError("G1 bootstrap samples must be a positive integer")
     entries = gate.get("learning_curves")
@@ -78,8 +84,9 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, seed
                 or identity != receipt.get("run_identity")
                 or identity["arm"] != arm or identity["dataset"] != "clean" or identity["seed"] != 1
                 or identity["stage"] != "pilot" or config.get("profile") is not False
-                or identity["model"] != "Qwen/Qwen2.5-3B-Instruct"):
-            raise ValueError(f"G1 {arm} must be a completed non-synthetic 3B clean seed-1 pilot run")
+                or any(identity[key] != expected_model[key] for key in ('model', 'revision'))
+                or config.get('model_amendment_sha256') != plan['amendment_sha256']):
+            raise ValueError(f"G1 {arm} must be a completed non-synthetic clean seed-1 pilot run matching the frozen model plan")
         from .training.config import TrainingConfig
         run_config = TrainingConfig(**config)
         run_config.validate()
@@ -205,8 +212,9 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     stage = config_dict.get("stage", "pilot")
     if stage not in ("profile", "pilot", "confirmatory"):
         raise ValueError("Unknown experiment stage")
-    model = config_dict.get("model_name_or_path", config_dict.get("model_id", config_dict.get("model", "")))
-    paid_required = stage == "confirmatory" or "7b" in model.lower()
+    # A model's name is not a study stage. An amended 7B/24B pilot still needs G0,
+    # while every confirmatory run/profile needs all gates and separate cost review.
+    paid_required = stage == "confirmatory"
     if not gate_file or (not profile_report and (stage != "profile" or paid_required)):
         raise ValueError("Training needs a calibration gate file and a completed profiling report")
     path = Path(gate_file)
@@ -215,7 +223,16 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if not calibration.get("frozen") or not calibration.get("manifest_sha256"):
         raise ValueError("G0: calibrate on development stories and freeze the corpus before training")
     verify_evidence(review["gates"]["G0"], path.parent)
-    validate_calibration_manifest(calibration)
+    validate_calibration_manifest(calibration, root=path.parent)
+    from .training.model_plan import calibrated_model_plan, assert_config_model_plan, assert_profile_identity
+    plan = calibrated_model_plan(calibration, path.parent)
+    assert_config_model_plan(config_dict, plan)
+    if plan['amendment_sha256'] is not None:
+        amendment = calibration['settings']['model_plan']['amendment']
+        if not any((path.parent / item['path']).resolve() == (path.parent / amendment['path']).resolve()
+                   and item['sha256'] == plan['amendment_sha256']
+                   for item in review['gates']['G0']['evidence']):
+            raise ValueError('The frozen model amendment must be included in reviewed G0 evidence')
     if stage == "profile" and not paid_required:
         return review
     profile = json.loads(Path(profile_report).read_text())
@@ -237,12 +254,7 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     profiled_arm = profile.get("config", {}).get("arm")
     if profiled_arm not in ARMS:
         raise ValueError("Profiling measurement requires its declared training arm")
-    # A target-size bootstrap profile may cite the earlier pilot profile. A full
-    # training run must use measurements for its own arm, not another objective.
-    requested_arm = config_dict.get("arm")
-    if (requested_arm is not None and requested_arm != profiled_arm
-            and stage != "profile" and not config_dict.get("profile", False)):
-        raise ValueError("Training requires a profile of the same arm")
+    assert_profile_identity(config_dict, profile, plan)
     if profile["update_seconds"] <= 0:
         raise ValueError("Profiling must measure an optimization update")
     if profiled_arm.endswith("_rl"):
@@ -273,9 +285,9 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
         verify_g1_learning_curves(review["gates"]["G1"], path.parent,
-                                  expected_manifest_sha256=calibration["manifest_sha256"])
+                                  expected_manifest_sha256=calibration["manifest_sha256"], calibration=calibration)
         settings = calibration.get("settings", {})
-        _validate_frozen_g4_band(settings)
+        _validate_frozen_g4_band(settings, plan=plan)
         test_layers = settings.get("g4_test_layers")
         if test_layers is None:
             raise ValueError("G4 pilot evidence band must be declared in frozen calibration settings.g4_test_layers")
@@ -284,7 +296,7 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
         verify_g4_positive_control(review["gates"]["G4"], path.parent, expected_test_layers=test_layers)
         paid = review.get("paid_compute", {})
         if not paid.get("approved") or not paid.get("approved_by"):
-            raise ValueError("Paid 7B runs require the proposal's explicit cost approval after gate review")
+            raise ValueError("Confirmatory runs require the proposal's explicit cost approval after gate review")
         if paid.get("estimated_gbp") is None or not paid.get("exchange_rate_date"):
             raise ValueError("Record the profiling-based cost and exchange-rate date")
         estimate, limit = paid["estimated_gbp"], paid.get("gbp_limit", 500)
@@ -309,17 +321,24 @@ def freeze_calibration(review_path, manifest, settings, evidence, reviewer, rati
         raise ValueError("Calibration is already frozen; use a new preregistered experiment lineage")
     from .data import assert_calibration_corpus
     _validate_difficulty_review(settings)
-    _validate_frozen_g4_band(settings)
+    from .training.model_plan import calibrated_model_plan
+    calibration = {"frozen": True, "manifest_sha256": file_digest(manifest),
+                   "manifest_path": str(Path(manifest).resolve()), "settings": settings}
+    plan = calibrated_model_plan(calibration, path.parent)
+    _validate_frozen_g4_band(settings, plan=plan)
     assert_calibration_corpus(manifest)
-    review["calibration"] = {"frozen": True, "manifest_sha256": file_digest(manifest),
-                             "manifest_path": str(Path(manifest).resolve()), "settings": settings}
+    review["calibration"] = calibration
     review["gates"]["G0"] = {"status": "pass", "reviewed_by": reviewer, "rationale": rationale,
                                "evidence": [{"path": str(Path(evidence).resolve()), "sha256": file_digest(evidence)}]}
+    if plan['amendment_sha256'] is not None:
+        amendment = settings['model_plan']['amendment']
+        review['gates']['G0']['evidence'].append({
+            'path': str((path.parent / amendment['path']).resolve()), 'sha256': plan['amendment_sha256']})
     write_json(path, review)
     return review
 
 
-def validate_calibration_manifest(calibration):
+def validate_calibration_manifest(calibration, *, root=None):
     """Old or modified corpora cannot reuse a G0 approval after the generator fix."""
     from .data import assert_calibration_corpus
     manifest = calibration.get("manifest_path")
@@ -328,7 +347,9 @@ def validate_calibration_manifest(calibration):
     if file_digest(manifest) != calibration.get("manifest_sha256"):
         raise ValueError("G0 corpus manifest was modified after calibration")
     _validate_difficulty_review(calibration.get("settings", {}))
-    _validate_frozen_g4_band(calibration.get("settings", {}))
+    from .training.model_plan import calibrated_model_plan
+    plan = calibrated_model_plan(calibration, root or Path.cwd())
+    _validate_frozen_g4_band(calibration.get("settings", {}), plan=plan)
     return assert_calibration_corpus(manifest)
 
 
@@ -348,7 +369,7 @@ def _validate_difficulty_review(settings):
         raise ValueError("G0 difficulty review needs a reviewer interpretation relative to chance and ceiling")
 
 
-def _validate_frozen_g4_band(settings):
+def _validate_frozen_g4_band(settings, *, plan=None):
     if settings.get("g4_layer_policy") != G4_LAYER_POLICY:
         raise ValueError("Frozen calibration requires g4_layer_policy='all_after_embedding_layer' for each model's layers 1 through last")
     layers = settings.get("g4_test_layers")
@@ -356,3 +377,7 @@ def _validate_frozen_g4_band(settings):
             or any(type(layer) is not int or layer < 1 for layer in layers)
             or layers != list(range(1, max(layers) + 1))):
         raise ValueError("Frozen G4 pilot test layers must include every layer from 1 through the pilot model's final layer")
+    if layers is not None and plan is not None:
+        from .training.config import MODEL_LAYERS
+        if layers != list(range(1, MODEL_LAYERS[plan['pilot']['model']])):
+            raise ValueError("Frozen G4 pilot test layers must match the declared pilot model's full layer geometry")

@@ -203,7 +203,8 @@ def main(argv=None):
         if Path(args.output).resolve() == Path(args.review).resolve():
             raise ValueError("G1 evidence output must not overwrite the review")
         result = verify_g1_learning_curves(review["gates"]["G1"], Path(args.review).parent,
-                                          expected_manifest_sha256=review["calibration"]["manifest_sha256"])
+                                          expected_manifest_sha256=review["calibration"]["manifest_sha256"],
+                                          calibration=review["calibration"])
         write_json(args.output, {"schema_version": 1, "review_sha256": file_digest(args.review),
                                 "learning_curves": result,
                                 "note": "Evidence completeness only. No reviewer decision or numerical pass mark is inferred."})

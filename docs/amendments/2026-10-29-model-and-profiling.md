@@ -1,0 +1,29 @@
+# Model and resource-profiling amendment — 29 October 2026
+
+Recorded after the three complete, untrained development capability panels and before any research training or confirmation outcomes. The user asked to run the revised study on their existing Vast instance, raised the small-model capability concern, and delegated the model decision. Reviewer: **Codex, automated technical review under that instruction**. This is not a human edit audit.
+
+## Model decision
+
+Use **mistralai/Mistral-Small-24B-Instruct-2501**, revision `9527884be6e5616bdd54de542f9ae13384489724`, for both the pilot and the intended confirmatory grid, subject to measured resource feasibility. This is the exact Paper 1 larger checkpoint. Retain the three pilot arms, four confirmatory arms, clean/shortcut datasets, three confirmatory seeds and all other fixed design choices. The primary intervention band is layers **1–39**. The unchanged proposal's 3B/7B plan and the earlier prospective capability plan remain archived.
+
+All three models saw the same 120 clean development worlds; no confirmation outcome was inspected. Immediate direct accuracy (95% whole-story bootstrap interval, 20,000 resamples) was 23.3% [15.8, 30.8] at Qwen 3B, 38.3% [30.0, 46.7] at Qwen 7B and 46.7% [37.5, 55.8] at Mistral 24B. Mean accuracy over the seven unrewarded views was 35.0%, 42.5% and 59.2%, respectively. The 3B interval does not support the proposal's intended clearly-above-chance baseline. The larger model offers more consequence accuracy and continuity with Paper 1; this is not a model-size causal comparison because architecture/family also changes.
+
+Native reasoning scored strictly under the existing reward rule was 13.3%, 35.8% and 20.0%. Mistral had 75 invalid completions, each ending in an extra period (`Answer: X.`). A **posthoc diagnostic**, accepting that period, gives 54.2% [45.0, 63.3]; it does not replace the primary score or change the reward parser. Forty-one otherwise-correct letters fail the strict format. Formatting is therefore a plausible learnable limitation to inspect in G1, not evidence that all these traces reason incorrectly. Depth two remains weak: Mistral's immediate direct accuracy is 20%, and its diagnostic terminal-letter accuracy is 28.3% [16.7, 40.0]. G1 must report depth strata and formatting alongside all three arms' ordinary learning curves. No claim that 24B solves nested belief tracking is made.
+
+G0 judges the chosen model's immediate direct interval clearly above six-choice chance and below ceiling overall, with sufficient headroom to measure learning. The known weak heuristics remain explicit comparison lines. Depth-two floor effects, native-format failures and low joint correctness limit interpretation and remain visible; they are not removed by selecting a favorable subset. This authorizes resource profiling and a costed pilot, not G1–G4 or confirmation.
+
+## Resource profiling before the learning-rate panel
+
+Run a disposable five-update profile for each pilot arm from the same untrained 24B checkpoint. Use the inherited reference rates, group size eight, rank-16 LoRA on the fixed seven modules, bfloat16, SDPA, gradient checkpointing and no quantization. Keep the full 120-world immediate/native development panels at step zero and the final step, and save the actual adapter and optimizer checkpoint. Initial profiling has an explicit two-hour batch budget and stops on any arm's failure. Its adapters never initialize the learning arms.
+
+The five-update runs test memory, actual training/evaluation/saving costs and the execution path. They do not establish steady-state throughput. A prospectively declared extension, if needed, uses 25 updates from a fresh base with the same settings and evaluation only at zero/final; it is selected on timing/resource stability, not accuracy. Preserve all profiling scores but do not use them to choose a learning rate, model, corpus or schedule. A full-cap resource bound accompanies observed lengths.
+
+After these measurements, cost the original 24-run rate/warmup panel and the proposal-permitted 12-run version that drops the warmup factor. A panel choice is frozen in a dated resource decision **before any candidate learning run**, using costs and storage rather than profiling accuracy. Both retain rates ×1/3/10/30 and the existing final-native-development family selection/tie rule. If neither full-pool panel plus the intended confirmatory study fits the £500 ceiling, record a further prospective resource amendment before launching it; do not silently shorten candidate runs, drop seeds or spend past the ceiling. Profiling is a disposable resource measurement, not the optional learning comparison.
+
+The initial editor candidate remains pinned Qwen2.5-7B-Instruct (`a09a35458c702b33eeacc393d103063234e8bc28`), the repository's fixed editor prompt, greedy decoding, seed 2026 and a 2,048-token edit-output budget. Freeze the exact generation plan and random audit sample before creating edits. G3 requires the actual named human sample review; the automated G0 decision does not substitute for it.
+
+## Provenance and limits
+
+Capability execution used public commit `7595f01b4ca90e31512508e8a6f290cfb696eddf`, tree `071f930cb6d4570bd18c45ede42e259f1f1732fc`, and corpus manifest SHA256 `01b4e8106d9a178b707a8702ad0724167e4ada03921dec503a8779be4195562c`. The run lineage retains raw completions/token IDs, immutable protocols, record hashes, cost receipts, diagnostics and the three-model report under `runs/vast-20261029`. The machine-readable model amendment binds those exact files; later source changes do not retrospectively change capability results.
+
+The new nine-event stories and letter answers prevent a direct replication of Paper 1's scores even with the identical checkpoint. No confirmation or training hypothesis outcome selected this model. Larger-model training feasibility, the G1–G4 measurements and the final cost remain to be established.
