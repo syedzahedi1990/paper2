@@ -4,7 +4,9 @@ The user supplied the revised proposal and requested execution on an existing Va
 
 ## Capability evidence before a training commitment
 
-Evaluate the same 120 clean development stories with the existing immediate-answer procedure on all eight views and the existing native reasoning procedure on the direct view. Keep the 384-token trace cap. Report whole-story intervals, depth/event strata, invalid answers, trace lengths and truncation alongside the descriptive heuristic references. Do not inspect confirmation outcomes.
+Evaluate the same 120 clean development stories with the existing immediate-answer procedure on all eight views and the native training/G1 reasoning procedure on the direct view. Keep the 384-token trace cap. Report whole-story intervals, depth/event strata, invalid answers, trace lengths and truncation alongside the descriptive heuristic references. Do not inspect confirmation outcomes.
+
+Prospective measurement clarification, before any capability outcomes: native reasoning uses the exact G1 evaluator, one uninterrupted greedy completion with the training trace-cap processor and reward parser. It does not stop at a delimiter and separately continue, re-render a trace, or append an answer request after early EOS. Preserve raw completion text and token IDs, parsed and reward-valid answers, trace lengths, forced-delimiter and truncation flags. A parsed correct letter in a reward-invalid completion remains incorrect. The screen meters this one native generation, including forced delimiter tokens; it does not add the Test 2 replay probe. Immediate accuracy remains the primary no-trace measurement. Inspect invalid-answer rates and native-format performance before interpreting low immediate accuracy as a capability limit.
 
 Use these immutable untrained checkpoints:
 

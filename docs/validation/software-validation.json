@@ -1,14 +1,14 @@
 {
   "code_test_config_hash_method": "SHA256 of compact sorted JSON mapping relative path to file SHA256 for src/tests/configs/scripts and pyproject.toml; excludes Python caches and egg-info",
-  "code_test_config_sha256": "3c829974c01ba3f3a03916ffe1fad59bdff0bbf66c5311d829fb36ed3cf39a69",
+  "code_test_config_sha256": "7762f4f53605d35a71636964661183bd66e9f2fd7b8d11bd14f46a979f97852d",
   "core_environment_without_torch": {
     "errors": 0,
     "failures": 0,
-    "passed": 329,
-    "seconds": 54.29,
-    "skipped": 12,
+    "passed": 345,
+    "seconds": 56.451,
+    "skipped": 13,
     "test_command": "/tmp/paper2-core-review/bin/python -m pytest -q",
-    "tests": 341
+    "tests": 358
   },
   "corpus_data_files_compared": 17,
   "corpus_hash": "0f6ef303cb86d2672fde8f7ac5c641e87b32c66b747245240efe08f49868a8f4",
@@ -34,7 +34,7 @@
     "upstream_revision": "3f22b66276b2d7ca5fe573c28c79cc0d077aafc5"
   },
   "paid_compute_run": false,
-  "passed": 365,
+  "passed": 382,
   "platform": "macOS-14.7.4-arm64-arm-64bit",
   "prior_verifications_retained_from_v060": [
     "Full corpus regeneration and 17-file byte comparison against v0.5",
@@ -45,18 +45,18 @@
   "proposal_sha256": "7ba46d82950b0ce866130aa85ef3b58f1a2fbd8fbc9add71797d35e01470a4f3",
   "python": "3.12.14",
   "release_checks": [
-    "Development-only 120-world capability runner: evaluator reuse, durable resume, immutable data/model/source identities, 20,000 story intervals",
-    "H3 descriptive eight-arm/dataset figure: paired natural-minus-own before/after effect, exact story/seed/checkpoint support and frozen corpus/adapter hashes",
-    "Inference receipts bind actual retained adapter weights and normalize checkpoint paths",
-    "Full prior regression suite including tiny-Qwen optimizer integration"
+    "Exact uninterrupted G1 generation/reward rules in capability screening, raw completion IDs and parsed-versus-valid diagnostics",
+    "Arm-aware measured profiles: SFT supervised updates without fabricated RL rollouts; same-arm prerequisite for production",
+    "Actual-device timing and memory accounting, including CPU training on CUDA-capable hosts",
+    "Full prior regression suite including tiny-Qwen optimizer integration, H3 provenance and capability resume"
   ],
   "research_model_training_run": false,
   "revised_proposal_sha256": "22261b8fea9fb2f9d901e947757f8763aa28aa77a16131924eed759abc952634",
-  "scope": "Local CPU software validation including genuine tiny-Qwen optimizer integration, H3 estimands/provenance and mock capability-runner resume. Empirical execution records are separate under runs/vast-20261029; this certificate does not approve scientific gates.",
-  "seconds": 68.551,
+  "scope": "Local CPU software validation including genuine tiny-Qwen optimizer integration, exact native capability scoring, truthful per-arm profiling and actual-device accounting. Empirical execution records remain separate under runs/vast-20261029; this certificate does not approve scientific gates.",
+  "seconds": 69.374,
   "skipped": 0,
   "test_command": ".venv/bin/python -m pytest -q",
-  "tests": 365,
+  "tests": 382,
   "validated_stack": {
     "accelerate": "1.8.1",
     "datasets": "3.6.0",
@@ -68,8 +68,8 @@
     "transformers": "4.53.2",
     "trl": "0.20.0"
   },
-  "version": "0.6.2",
-  "wheel": "paper2_reasoning_rl-0.6.2-py3-none-any.whl",
-  "wheel_sha256": "d7ab7002094928fa33ad705ec961255aefc00b3c689c0cb0ef3f86f203e43196",
+  "version": "0.6.3",
+  "wheel": "paper2_reasoning_rl-0.6.3-py3-none-any.whl",
+  "wheel_sha256": "d0eeb5e998b09d88701a86dd9b6802775350d21f914e97f24790e89712bbc1e2",
   "windows_ci": "Workflow configured; not claimed as executed locally"
 }

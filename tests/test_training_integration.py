@@ -246,10 +246,24 @@ def test_one_epoch_grpo_budget_actually_visits_every_training_world(tmp_path):
     assert report['compute']['training_pool_coverage'] == 1
 
 
-def test_profile_evaluates_off_interval_final_and_records_resource_projection(tmp_path):
+@pytest.mark.parametrize('advertise_cuda', [False, True])
+def test_profile_evaluates_off_interval_final_and_records_resource_projection(tmp_path, monkeypatch, advertise_cuda):
     from paper2.training.config import TrainingConfig
     from paper2.training.runner import run_training
     model, tok = tiny_fixture()
+    cuda_accounting_calls = []
+    if advertise_cuda:
+        import torch
+        monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+        # A CUDA-capable host may run this explicitly CPU-only integration path.
+        # Stub host APIs so this regression also runs on machines without CUDA.
+        for name, result in [('synchronize', None), ('reset_peak_memory_stats', None),
+                             ('max_memory_allocated', 123456), ('get_device_name', 'Advertised GPU')]:
+            def recorded(*args, _name=name, _result=result, **kwargs):
+                cuda_accounting_calls.append(_name)
+                return _result
+            monkeypatch.setattr(torch.cuda, name, recorded)
+        monkeypatch.setattr(torch.cuda.random, 'get_rng_state', lambda *args, **kwargs: torch.get_rng_state())
     config = TrainingConfig(arm='answer_rl', stage='profile', model='paper2-random-tiny-qwen',
                             max_steps=3, eval_steps=2, immediate_eval_steps=1, save_steps=2, bf16=False,
                             gradient_checkpointing=False, lora_rank=2, lora_alpha=4, beta=0.0)
@@ -272,5 +286,11 @@ def test_profile_evaluates_off_interval_final_and_records_resource_projection(tm
     assert evidence['latest']['step'] == 3 and evidence['baseline']['step'] == 0
     report = json.loads((tmp_path / 'profile_report.json').read_text())
     assert report['synthetic'] is True and report['gpu_seconds'] == 0
+    assert report['peak_cuda_memory_bytes'] == 0 and report['hardware'] == 'CPU synthetic test'
+    assert report['training_device'] == result['manifest']['training_device'] == 'cpu'
+    assert not cuda_accounting_calls
+    for checkpoint in tmp_path.glob('checkpoint-*'):
+        snapshot = json.loads((checkpoint / 'paper2_compute.json').read_text())
+        assert snapshot['gpu_seconds'] == 0 and snapshot['peak_cuda_memory_bytes'] == 0
     assert report['full_pool_resource_projection']['projected_total_seconds'] > 0
     assert report['full_pool_resource_projection']['projected_evaluated_adapter_bytes'] > 0

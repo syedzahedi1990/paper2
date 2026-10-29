@@ -224,7 +224,7 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
     if profile.get("synthetic") is not False:
         raise ValueError("A synthetic or unspecified profile cannot authorize real-model training")
     measured = ("generation_seconds", "update_seconds", "checkpoint_seconds", "peak_cuda_memory_bytes",
-                "generated_tokens", "sampled_completions", "generation_tokens_per_second", "truncation_rate",
+                "generated_tokens", "sampled_completions", "truncation_rate",
                 "evaluation_seconds", "evaluation_panels", "evaluation_native_generations",
                 "evaluation_generated_tokens", "max_evaluated_adapter_bytes",
                 "evaluation_native_seconds", "evaluation_immediate_seconds",
@@ -233,9 +233,35 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
         value = profile.get(field)
         if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
             raise ValueError(f"Profiling must report a finite nonnegative measurement: {field}")
-    if any(profile[field] <= 0 for field in ("generation_seconds", "update_seconds", "generated_tokens",
-                                            "sampled_completions", "generation_tokens_per_second")):
-        raise ValueError("Profiling must measure actual generation and an optimization update")
+    from .training.config import ARMS
+    profiled_arm = profile.get("config", {}).get("arm")
+    if profiled_arm not in ARMS:
+        raise ValueError("Profiling measurement requires its declared training arm")
+    # A target-size bootstrap profile may cite the earlier pilot profile. A full
+    # training run must use measurements for its own arm, not another objective.
+    requested_arm = config_dict.get("arm")
+    if (requested_arm is not None and requested_arm != profiled_arm
+            and stage != "profile" and not config_dict.get("profile", False)):
+        raise ValueError("Training requires a profile of the same arm")
+    if profile["update_seconds"] <= 0:
+        raise ValueError("Profiling must measure an optimization update")
+    if profiled_arm.endswith("_rl"):
+        throughput = profile.get("generation_tokens_per_second")
+        if (type(throughput) not in (int, float) or not math.isfinite(throughput) or throughput <= 0
+                or any(profile[field] <= 0 for field in
+                       ("generation_seconds", "generated_tokens", "sampled_completions"))):
+            raise ValueError("RL profiling must measure actual rollout generation and sampled completions")
+    else:
+        # SFT has no training rollouts. Native development generation is measured
+        # separately below; fabricating rollout throughput would corrupt costs.
+        if (any(profile[field] != 0 for field in
+                ("generation_seconds", "generated_tokens", "sampled_completions"))
+                or profile.get("generation_tokens_per_second") is not None):
+            raise ValueError("SFT profiling must report zero training rollouts and undefined rollout throughput")
+        for field in ("supervised_tokens", "optimized_tokens", "prompt_exposures"):
+            value = profile.get(field)
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"SFT profiling must measure supervised optimization: {field}")
     if any(profile[field] <= 0 for field in ("evaluation_seconds", "evaluation_panels",
                    "evaluation_native_generations", "evaluation_generated_tokens", "max_evaluated_adapter_bytes",
                    "evaluation_native_seconds", "evaluation_immediate_seconds",

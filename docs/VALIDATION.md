@@ -1,8 +1,8 @@
-# Validation status — version 0.6.2
+# Validation status — version 0.6.3
 
-**365 tests passed**, with zero failures or skips, on Python 3.12.14 and the pinned CPU training stack. Without PyTorch, **329 tests passed** with 12 expected optional-model skips. Both environments include the optional plotting dependency. Ruff, dependency checks, wheel build and all **45 documented CLI commands** passed. [Software evidence](validation/software-validation.json) records versions, counts and hashes. This release was tested on macOS; Windows CI is configured, not claimed as locally executed.
+**382 tests passed**, with zero failures or skips, on Python 3.12.14 and the pinned CPU training stack. Without PyTorch, **345 tests passed** with 13 expected optional-model skips. Both environments include the optional plotting dependency. Ruff, dependency checks, wheel build and all **45 documented CLI commands** passed. [Software evidence](validation/software-validation.json) records versions, counts and hashes. This release was tested on macOS; Windows CI is configured, not claimed as locally executed.
 
-Version 0.6.2 adds coverage for the development-only resumable capability runner, H3 paired cross-arm estimands and frozen corpus/adapter provenance. Mock runner tests do not constitute capability measurements. The full pinned-stack suite takes 68.55 seconds locally; the core suite takes 54.30 seconds.
+Version 0.6.3 aligns capability scoring with the exact uninterrupted G1 procedure, validates SFT profiles without invented RL rollout measurements, and accounts for the actual training device on CUDA-capable hosts. Prior H3/provenance and durable-resume coverage remains. Mock runner tests do not constitute capability measurements. The full pinned-stack suite takes 69.38 seconds locally; the core suite takes 56.46 seconds.
 
 Version 0.6.1 added coverage for all 24 development-panel configurations, exact exported file hashes, unchanged exposure, all-arm G1 completeness/provenance, pointwise and paired learning intervals, and preservation of pending reviewer decisions. Flat learning is valid evidence without a gain cutoff.
 

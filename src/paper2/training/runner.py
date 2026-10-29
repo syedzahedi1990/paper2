@@ -28,9 +28,10 @@ def check_stack() -> dict[str, str]:
     return installed
 
 
-def _sync(torch: Any) -> None:
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+def _sync(torch: Any, device: Any) -> None:
+    """Synchronize the device doing this run, not an unrelated available GPU."""
+    if device.type == 'cuda':
+        torch.cuda.synchronize(device)
 
 
 def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
@@ -40,19 +41,19 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
 
     class TimingMixin:
         def training_step(self, *args, **kwargs):
-            _sync(torch)
+            _sync(torch, self.model.device)
             before_generation = ledger.generation_and_scoring_seconds
             start = time.perf_counter()
             result = super().training_step(*args, **kwargs)
-            _sync(torch)
+            _sync(torch, self.model.device)
             ledger.update_seconds += max(0, time.perf_counter() - start - (ledger.generation_and_scoring_seconds - before_generation))
             return result
 
         def _save_checkpoint(self, *args, **kwargs):
-            _sync(torch)
+            _sync(torch, self.model.device)
             start = time.perf_counter()
             result = super()._save_checkpoint(*args, **kwargs)
-            _sync(torch)
+            _sync(torch, self.model.device)
             elapsed = time.perf_counter() - start
             ledger.checkpoint_seconds += elapsed
             ledger.resumable_checkpoint_save_seconds += elapsed
@@ -62,9 +63,9 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
                 snapshot = ledger.to_dict()
                 elapsed = time.perf_counter() - self._paper2_run_started
                 snapshot['wall_seconds'] += elapsed
-                if torch.cuda.is_available():
+                if self.model.device.type == 'cuda':
                     snapshot['gpu_seconds'] += elapsed
-                    snapshot['peak_cuda_memory_bytes'] = max(snapshot['peak_cuda_memory_bytes'], int(torch.cuda.max_memory_allocated()))
+                    snapshot['peak_cuda_memory_bytes'] = max(snapshot['peak_cuda_memory_bytes'], int(torch.cuda.max_memory_allocated(self.model.device)))
                 (checkpoint / 'paper2_compute.json').write_text(json.dumps(snapshot, indent=2) + '\n')
             return result
 
@@ -91,10 +92,10 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
                     processors.append(cap)
                     existing = list(kwargs.pop('logits_processor', []))
                     kwargs['logits_processor'] = LogitsProcessorList(existing + [cap])
-                _sync(torch)
+                _sync(torch, self.model.device)
                 start = time.perf_counter()
                 result = original_generate(*args, **kwargs)
-                _sync(torch)
+                _sync(torch, self.model.device)
                 if training:
                     ledger.generation_seconds += time.perf_counter() - start
                 return result
@@ -102,13 +103,13 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
             # TRL's standard single-device generation unwraps to this same model.
             # Restrict this backend to that audited generation arrangement.
             self.model.generate = timed_generate
-            _sync(torch)
+            _sync(torch, self.model.device)
             start = time.perf_counter()
             try:
                 result = super()._generate_and_score_completions(inputs)
             finally:
                 self.model.generate = original_generate
-            _sync(torch)
+            _sync(torch, self.model.device)
             if training:
                 ledger.observe_worlds(row['world_id'] for row in inputs)
                 ledger.generation_and_scoring_seconds += time.perf_counter() - start
@@ -200,7 +201,7 @@ def _development_predictions(model: Any, tokenizer: Any, rows: list[dict[str, An
                                                 trace_cap=config.trace_cap)[0])
             records.append({**common, 'format': 'native_reasoning' if config.reasoning else 'native_answer',
                             'prediction': native_prediction, 'correct': native_correct,
-                            'completion': text, 'completion_tokens': len(completion),
+                            'completion': text, 'completion_ids': completion, 'completion_tokens': len(completion),
                             'forced_delimiter': bool(cap and cap.capped_rows),
                             'truncated': tokenizer.eos_token_id not in completion})
     finally:
@@ -375,11 +376,11 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
 
     class RecordCurve(TrainerCallback):
         def on_pre_optimizer_step(self, args, state, control, **kwargs):
-            _sync(torch)
+            _sync(torch, trainer.model.device)
             self.optimizer_started = time.perf_counter()
 
         def on_optimizer_step(self, args, state, control, **kwargs):
-            _sync(torch)
+            _sync(torch, trainer.model.device)
             elapsed = time.perf_counter() - self.optimizer_started
             ledger.optimizer_seconds += elapsed
             ledger.update_seconds += elapsed
@@ -396,11 +397,11 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             # Rotation may remove resumable trainer checkpoints. Preserve a small
             # adapter at every evaluated step so matching never selects missing weights.
             adapter = output / 'evaluated_checkpoints' / f'checkpoint-{step}'
-            _sync(torch)
+            _sync(torch, trainer.model.device)
             start = time.perf_counter()
             trainer.save_model(str(adapter))
             tokenizer.save_pretrained(str(adapter))
-            _sync(torch)
+            _sync(torch, trainer.model.device)
             elapsed = time.perf_counter() - start
             ledger.checkpoint_seconds += elapsed
             ledger.evaluated_adapter_save_seconds += elapsed
@@ -414,11 +415,11 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                                  ('native', native_evaluation_steps)):
                 if step not in scheduled_steps:
                     continue
-                _sync(torch)
+                _sync(torch, trainer.model.device)
                 start = time.perf_counter()
                 predictions.extend(_development_predictions(trainer.model, tokenizer, dev_rows, config, torch,
                                                             formats=(format_name,)))
-                _sync(torch)
+                _sync(torch, trainer.model.device)
                 elapsed = time.perf_counter() - start
                 ledger.evaluation_seconds += elapsed
                 if format_name == 'native':
@@ -485,6 +486,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                 self.evaluate(state.global_step)
 
     trainer.add_callback(RecordCurve())
+    training_device = trainer.model.device
     trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     manifest = {'config': config.to_dict(), 'stack': versions, 'torch': torch.__version__,
                 'training_budget': budget, 'resource_plan': planned_resources,
@@ -494,14 +496,15 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                 'generation_arrangement': 'single process/device; transformers generate; no vLLM; standard KV cache',
                 'supervision_mask': 'Completion tokens only; prompt and padding masked; injected cap delimiter masked for RL.',
                 'synthetic_integration_test': synthetic, 'resume_from_checkpoint': resume_from_checkpoint,
+                'training_device': str(training_device),
                 'corpus_manifest': str(corpus_manifest) if corpus_manifest else None,
                 'corpus_manifest_sha256': file_digest(corpus_manifest) if corpus_manifest else None,
                 'gate_file': str(gate_file) if gate_file else None, 'profile_report': str(profile_report) if profile_report else None,
                 'status': 'running'}
     (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-    _sync(torch)
+    if training_device.type == 'cuda':
+        torch.cuda.reset_peak_memory_stats(training_device)
+    _sync(torch, trainer.model.device)
     start = time.perf_counter()
     trainer._paper2_run_started = start
     try:
@@ -512,7 +515,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         trainer.save_model(str(output / 'adapter'))
         tokenizer.save_pretrained(str(output / 'adapter'))
         trainer.save_state()
-        _sync(torch)
+        _sync(torch, trainer.model.device)
         elapsed = time.perf_counter() - save_start
         ledger.checkpoint_seconds += elapsed
         ledger.final_adapter_save_seconds += elapsed
@@ -523,12 +526,12 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         manifest['error'] = str(error)
         raise
     finally:
-        _sync(torch)
+        _sync(torch, trainer.model.device)
         elapsed = time.perf_counter() - start
         ledger.wall_seconds += elapsed
-        if torch.cuda.is_available():
+        if training_device.type == 'cuda':
             ledger.gpu_seconds += elapsed
-            ledger.peak_cuda_memory_bytes = max(ledger.peak_cuda_memory_bytes, int(torch.cuda.max_memory_allocated()))
+            ledger.peak_cuda_memory_bytes = max(ledger.peak_cuda_memory_bytes, int(torch.cuda.max_memory_allocated(training_device)))
         ledger.save(output / 'compute_report.json')
         (output / 'run_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         if (output / 'g1_learning_evidence.json').is_file():
@@ -537,7 +540,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     if config.profile or config.stage == 'profile':
         profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget,
                    'resource_plan': planned_resources, 'model': config.model,
-                   'hardware': torch.cuda.get_device_name() if torch.cuda.is_available() else 'CPU synthetic test',
+                   'hardware': torch.cuda.get_device_name(training_device) if training_device.type == 'cuda' else 'CPU synthetic test',
+                   'training_device': str(training_device),
                    'synthetic': synthetic, **report,
                    'full_pool_resource_projection': full_pool_projection(config, len(training_rows), len(dev_rows or []),
                                                                          delimiter_tokens, report, synthetic=synthetic),

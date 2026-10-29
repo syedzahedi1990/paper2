@@ -14,7 +14,7 @@ from paper2.analysis import accuracy_summary
 from paper2.backend import HFBackend
 from paper2.data import VIEWS
 from paper2.data.corpus import CORPUS_SCHEMA
-from paper2.evaluation import evaluate_immediate, evaluate_native
+from paper2.evaluation import evaluate_immediate
 from paper2.io import digest, file_digest, read_jsonl
 
 
@@ -74,6 +74,38 @@ class MeteredBackend:
         return result
 
 
+def evaluate_native_capability(backend, row):
+    """Use the identical uninterrupted generation and reward rules used for G1.
+
+    Trace-reader replay generation is deliberately separate: it can re-render an
+    unfinished trace and inject a delimiter after early EOS. That is useful for
+    Test 2 controls but is not an ordinary native policy completion.
+    """
+    from paper2.prompts import ANSWER_DELIMITER, render_prompt
+    from paper2.training.config import TrainingConfig
+    from paper2.training.data import answer_reward
+    from paper2.training.runner import _development_predictions
+
+    config = TrainingConfig(arm='reasoning_rl')
+    prompt = render_prompt(backend.tokenizer, row, reasoning=True)
+    native = _development_predictions(backend.model, backend.tokenizer, [row], config,
+                                     backend.torch, formats=('native',))[0]
+    # The helper directly invokes model.generate once, bypassing backend.generate.
+    backend.metrics['generation_calls'] += 1
+    backend.metrics['generated_tokens'] += native['completion_tokens']
+    backend.metrics['generation_input_tokens'] += len(backend.token_ids(prompt))
+    parsed = native['prediction']
+    valid = parsed is not None and bool(answer_reward(
+        completions=[native['completion']], answer=[parsed], reasoning=True,
+        tokenizer=backend.tokenizer, trace_cap=config.trace_cap)[0])
+    trace = native['completion'].rsplit(ANSWER_DELIMITER, 1)[0]
+    return {**row, **native, 'reader': backend.checkpoint_id,
+            'parsed_prediction': parsed, 'prediction': parsed if valid else None,
+            'completion_valid': valid,
+            'trace': trace, 'trace_tokens': len(backend.token_ids(trace)),
+            'native_procedure': 'uninterrupted_g1_generation_and_reward_v1'}
+
+
 def summarize(records):
     rows = [row for record in records for row in record['predictions']]
     summaries = {}
@@ -86,6 +118,11 @@ def summarize(records):
                 summaries[format_name]['strata'][f'depth{depth}_{kind}'] = accuracy_summary(selected)
         summaries[format_name]['truncated'] = sum(bool(row.get('truncated')) for row in panel)
         summaries[format_name]['forced_delimiters'] = sum(bool(row.get('forced_delimiter')) for row in panel)
+        if format_name == 'native_reasoning':
+            parsed_panel = [{**row, 'prediction': row.get('parsed_prediction', row['prediction'])} for row in panel]
+            summaries[format_name]['parsed_answer_accuracy'] = accuracy_summary(parsed_panel)
+            summaries[format_name]['parsed_correct_but_reward_invalid'] = sum(
+                row.get('parsed_prediction') == row['answer'] and row['prediction'] != row['answer'] for row in panel)
     return summaries
 
 
@@ -105,11 +142,12 @@ def run_screen(corpus, output, model, revision, device='auto', dtype='bfloat16',
     identity = {'schema_version': 1, 'purpose': 'development_capability_only', **corpus_identity,
                 'model': model, 'revision': revision, 'device': device, 'dtype': dtype,
                 'trace_cap': 384, 'immediate_views': list(VIEWS), 'native_views': ['direct'],
+                'native_procedure': 'uninterrupted_g1_generation_and_reward_v1',
                 'bootstrap_samples': 20000, 'bootstrap_seed': 2026,
                 'script_sha256': file_digest(__file__),
                 'implementation_sha256': {name: file_digest(Path(__file__).resolve().parents[1] / 'src/paper2' / name)
                     for name in ('backend.py', 'evaluation.py', 'prompts.py', 'traces.py', 'analysis.py',
-                                 'training/data.py', 'training/generation.py')}}
+                                 'training/data.py', 'training/generation.py', 'training/runner.py', 'training/config.py')}}
     identity_hash = digest(identity)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -159,7 +197,7 @@ def run_screen(corpus, output, model, revision, device='auto', dtype='bfloat16',
                         predictions.append(result)
                     direct = next(row for row in world if row['view'] == 'direct')
                     tick = time.monotonic()
-                    result = next(evaluate_native(backend, [direct], reasoning=True))
+                    result = evaluate_native_capability(backend, direct)
                     result['wall_seconds'] = time.monotonic() - tick
                     predictions.append(result)
                     record = {'world_id': world_id, 'protocol_sha256': identity_hash,

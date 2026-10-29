@@ -1,6 +1,7 @@
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,7 +48,7 @@ def install_evaluators(monkeypatch, fail_after=None):
             yield {**row, 'format': 'native_reasoning' if reasoning else 'immediate',
                    'prediction': 'A' if reasoning or row['belief_depth'] == 1 else 'B'}
     monkeypatch.setattr(screen, 'evaluate_immediate', evaluate)
-    monkeypatch.setattr(screen, 'evaluate_native', evaluate)
+    monkeypatch.setattr(screen, 'evaluate_native_capability', lambda backend, row: next(evaluate(backend, [row], reasoning=True)))
     return calls
 
 
@@ -129,3 +130,56 @@ def test_structural_panels_rejected_even_with_consistent_file_hash(corpus, tmp_p
     write_json(manifest_path, manifest)
     with pytest.raises(ValueError, match='development|eight views'):
         screen.run_screen(corpus, tmp_path / 'run', 'test/model', REVISION, backend_factory=FakeBackend)
+
+
+@pytest.mark.parametrize('completion,parsed,correct,forced,truncated,valid', [
+    ('unfinished reasoning', None, False, False, False, False),
+    ('reason\nAnswer: A', 'A', True, False, False, True),
+    ('reason\nAnswer: A', 'A', True, True, True, True),
+    ('x' * 385 + '\nAnswer: A', 'A', False, False, True, False),
+    ('reason\nAnswer: C', 'C', False, False, False, True),
+])
+def test_native_screen_reuses_g1_without_rerender_or_replay_and_preserves_reward_validity(
+        monkeypatch, completion, parsed, correct, forced, truncated, valid):
+    class Tokenizer:
+        def encode(self, text, **kwargs):
+            return list(range(len(text)))
+
+        def apply_chat_template(self, messages, **kwargs):
+            return '|'.join(message['content'] for message in messages)
+
+    tokenizer = Tokenizer()
+    metrics = {'generation_calls': 0, 'generated_tokens': 0, 'generation_input_tokens': 0,
+               'answer_forward_calls': 0, 'answer_input_tokens': 0}
+    backend = SimpleNamespace(model=object(), tokenizer=tokenizer, torch=object(),
+                              token_ids=tokenizer.encode, checkpoint_id='test/model', metrics=metrics)
+    row = {'id': 'w0:direct', 'world_id': 'w0', 'view': 'direct', 'answer': 'A', 'split': 'development',
+           'story': 'A story.', 'question': 'A question?', 'choices': {'A': 'drawer', 'C': 'box'},
+           'belief_depth': 2, 'critical_event_kind': 'tell'}
+    calls = []
+
+    def native(model, received_tokenizer, rows, config, torch, *, formats):
+        assert model is backend.model and received_tokenizer is tokenizer and torch is backend.torch
+        assert rows == [row] and formats == ('native',)
+        assert config.reasoning and config.trace_cap == 384
+        calls.append(True)
+        return [{'id': row['id'], 'world_id': row['world_id'], 'view': 'direct', 'answer': 'A',
+                 'split': 'development', 'format': 'native_reasoning', 'prediction': parsed, 'correct': correct,
+                 'completion': completion, 'completion_ids': [5, 6, 7], 'completion_tokens': 3,
+                 'forced_delimiter': forced, 'truncated': truncated}]
+
+    monkeypatch.setattr('paper2.training.runner._development_predictions', native)
+    result = screen.evaluate_native_capability(backend, row)
+    assert calls == [True]
+    assert result['parsed_prediction'] == parsed
+    assert result['prediction'] == (parsed if valid else None)
+    assert result['completion_valid'] is valid and result['correct'] is correct
+    assert result['completion'] == completion and result['completion_ids'] == [5, 6, 7]
+    assert result['forced_delimiter'] is forced and result['truncated'] is truncated
+    assert result['belief_depth'] == 2 and result['critical_event_kind'] == 'tell'
+    assert metrics['generation_calls'] == 1 and metrics['generated_tokens'] == 3
+    assert metrics['generation_input_tokens'] > 0 and metrics['answer_forward_calls'] == 0
+    summary = screen.summarize([{'predictions': [result]}])['native_reasoning']
+    assert summary['overall']['accuracy'] == float(correct)
+    assert summary['parsed_answer_accuracy']['accuracy'] == float(parsed == 'A')
+    assert summary['parsed_correct_but_reward_invalid'] == int(parsed == 'A' and not valid)

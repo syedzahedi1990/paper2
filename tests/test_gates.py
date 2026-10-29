@@ -24,7 +24,7 @@ def reviewed(tmp_path, monkeypatch):
                                "gbp_limit": 500, "exchange_rate_date": "2026-10-28"}
     gate = tmp_path / "gates.json"
     write_json(gate, review)
-    profile = {"status": "completed", "synthetic": False, "generation_seconds": 2, "update_seconds": 1,
+    profile = {"status": "completed", "synthetic": False, "config": {"arm": "reasoning_rl"}, "generation_seconds": 2, "update_seconds": 1,
                "checkpoint_seconds": .1, "peak_cuda_memory_bytes": 1000, "generated_tokens": 16,
                "sampled_completions": 8, "generation_tokens_per_second": 8, "truncation_rate": 0,
                "evaluation_seconds": 2, "evaluation_panels": 2, "evaluation_native_generations": 240,
@@ -197,3 +197,58 @@ def test_paid_runs_require_all_arm_g1_evidence(reviewed, monkeypatch):
     monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", reject)
     with pytest.raises(ValueError, match="G1 missing label_sft"):
         assert_training_allowed({"stage": "confirmatory", "model": "Qwen/Qwen2.5-7B-Instruct"}, gate, report)
+
+
+def _sft_profile(profile):
+    from paper2.training.ledger import ComputeLedger
+    # Use the actual ledger representation: SFT generation throughput is None,
+    # not an invented positive count or time from native evaluation.
+    ledger = ComputeLedger(supervised_tokens=80, optimized_tokens=80, prompt_exposures=40)
+    values = ledger.to_dict()
+    profile.update({key: values[key] for key in (
+        'generation_seconds', 'generated_tokens', 'sampled_completions', 'generation_tokens_per_second',
+        'supervised_tokens', 'optimized_tokens', 'prompt_exposures')})
+    profile['config'] = {'arm': 'label_sft'}
+    return profile
+
+
+def test_genuine_sft_profile_allows_training_without_fabricated_rollout_counts(reviewed):
+    gate, report, _, profile = reviewed
+    write_json(report, _sft_profile(profile))
+    result = assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
+                                      'arm': 'label_sft'}, gate, report)
+    assert result['calibration']['frozen']
+
+
+@pytest.mark.parametrize('field,value', [('generation_seconds', 0), ('generated_tokens', 0),
+    ('sampled_completions', 0), ('generation_tokens_per_second', None)])
+def test_rl_profile_still_requires_actual_training_rollouts(reviewed, field, value):
+    gate, report, _, profile = reviewed
+    profile[field] = value
+    write_json(report, profile)
+    with pytest.raises(ValueError, match='RL profiling'):
+        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
+                                 'arm': 'reasoning_rl'}, gate, report)
+
+
+@pytest.mark.parametrize('field', ['supervised_tokens', 'optimized_tokens', 'prompt_exposures', 'update_seconds'])
+def test_sft_profile_requires_real_supervised_optimization(reviewed, field):
+    gate, report, _, profile = reviewed
+    _sft_profile(profile)[field] = 0
+    write_json(report, profile)
+    with pytest.raises(ValueError, match='optimization'):
+        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
+                                 'arm': 'label_sft'}, gate, report)
+
+
+def test_full_training_cannot_use_another_arms_profile(reviewed):
+    gate, report, _, _ = reviewed
+    with pytest.raises(ValueError, match='same arm'):
+        assert_training_allowed({'stage': 'pilot', 'model': 'Qwen/Qwen2.5-3B-Instruct',
+                                 'arm': 'answer_rl'}, gate, report)
+
+
+def test_target_size_bootstrap_profile_can_use_prior_pilot_arm_profile(reviewed):
+    gate, report, _, _ = reviewed
+    assert_training_allowed({'stage': 'confirmatory', 'model': 'Qwen/Qwen2.5-7B-Instruct',
+                             'arm': 'reasoning_sft', 'profile': True}, gate, report)
