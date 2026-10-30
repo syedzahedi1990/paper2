@@ -68,12 +68,10 @@ class Editor:
         trace = payload["trace"]
         before = re.search(r" is in the (\w+)", trace).group(1)
         after = payload["target_by_stated_location"][before]
-        start = trace.index(before)
-        irrelevant = trace.index("Then")
         output = {"status": "ready", "stated_location": before,
                   "paraphrase": trace.replace("Then we can", "Next we may"),
-                  "semantic": {"start": start, "end": start + len(before), "old": before, "new": after},
-                  "irrelevant": {"start": irrelevant, "end": irrelevant + 4, "old": "Then", "new": "Next"}}
+                  "semantic": {"old": before, "new": after},
+                  "irrelevant": {"old": "Then", "new": "Next"}}
         if self.mutate:
             output = self.mutate(output)
         return {"text": output if isinstance(output, str) else json.dumps(output),
@@ -173,7 +171,7 @@ def test_invalid_model_outputs_are_retained_as_operational_failures_without_usab
         if mutation == "answer_leak":
             output["paraphrase"] += "\nAnswer: A"
         elif mutation == "wrong_span":
-            output["semantic"]["start"] += 1
+            output["semantic"]["old"] += " absent"
         elif mutation == "extra_fact":
             output["semantic"]["new"] += " and Bob knows"
         elif mutation == "overlap":
@@ -450,11 +448,10 @@ def manual_controls(contract):
     trace = contract["generation"]["input"]["trace"]
     before = re.search(r" is in the (\w+)", trace).group(1)
     after = contract["semantic"]["trace_edit_options"][before]["oracle"]["after"]
-    start, irrelevant = trace.index(before), trace.index("Then")
     return {"status": "ready", "stated_location": before,
             "paraphrase": trace.replace("Then we can", "Afterward we can"),
-            "semantic": {"start": start, "end": start + len(before), "old": before, "new": after},
-            "irrelevant": {"start": irrelevant, "end": irrelevant + 4, "old": "Then", "new": "Next"}}
+            "semantic": {"old": before, "new": after},
+            "irrelevant": {"old": "Then", "new": "Next"}}
 
 
 def test_human_can_correct_sampled_false_ineligibility_without_losing_original_failure():

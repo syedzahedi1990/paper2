@@ -22,8 +22,8 @@ from paper2.io import digest, file_digest, read_jsonl
 from paper2.traces import _validate_source_trace, prepare_edit_manifest
 from paper2.training.config import NATURAL_COMPLETION_PROTOCOL, TrainingConfig
 from paper2.training.data import natural_completion_outcome, parse_answer
-from paper2.training.selection import (development_selection_panel, development_selection_spec,
-    assert_current_design)
+from paper2.training.selection import assert_current_design
+from paper2.training.selection_results import verify_panel_selection
 
 PURPOSE = 'g1_editability_only'
 MODEL = {'model': 'mistralai/Mistral-Small-24B-Instruct-2501', 'revision': '9527884be6e5616bdd54de542f9ae13384489724'}
@@ -35,7 +35,7 @@ ROLES = ('selection', 'panel_status', 'registry', 'config', 'run_manifest', 'pre
 
 
 def read(path):
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
 def reference(path):
@@ -111,7 +111,7 @@ def extract(predictions, development, raw_config, provenance, *, purpose=PURPOSE
                 or row['correct'] != (outcome['prediction'] == world['answer'])):
             raise ValueError('Recorded native outcome differs from observed completion/answer')
         trace = canonical_trace(text)
-        source = 'selected_reasoning_rl_native_checkpoint'
+        source = 'observed_reasoning_rl_native_checkpoint'
         source_checkpoint = {'id': checkpoint, 'revision': row['revision']}
         completion_hash = digest([text, ids, None, outcome])
         artifact = digest([source, source_checkpoint, row['id'], 'direct_fixed', digest(trace),
@@ -200,54 +200,8 @@ def validate_completed_panel(state, entries):
                        for filename in ('run_manifest.json', 'checkpoint_predictions.jsonl', 'g1_learning_evidence.json'))):
             raise ValueError('Every candidate needs its actual full-pool config/exit/completion evidence')
 
-def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
-    if purpose != PURPOSE:
-        raise ValueError('This helper cannot prepare replay or Test 2 evidence')
-    if Path(output).exists():
-        raise FileExistsError('G1 editor input output already exists; no overwrite')
-    binding_path = Path(binding_path).resolve()
-    if file_digest(binding_path) != expected_sha:
-        raise ValueError('Input binding hash mismatch')
-    binding = read(binding_path)
-    if binding.get('purpose') != PURPOSE or binding.get('scope') != 'selected_reasoning_rl_after_complete_panel':
-        raise ValueError('Require an explicitly selected run after the complete amended pilot panel')
-    paths = {key: bound(binding.get(key, {}), binding_path.parent, key) for key in ROLES}
-    registry, state, selection = (read(paths[key]) for key in ('registry', 'panel_status', 'selection'))
-    candidate = binding.get('candidate_name')
-    entries = registry.get('candidates', [])
-    expected_names = {Path(name).stem for name, cfg in development_selection_panel().items() if cfg['lr_scheduler_type'] == 'constant'}
-    if (registry.get('schema_version') != 2 or registry.get('panel') != 'four_rates_constant'
-            or registry.get('selection_rule') != development_selection_spec()['selection']
-            or registry.get('beta_by_arm') != {'reasoning_rl': .04, 'answer_rl': .04, 'label_sft': 0.}
-            or registry.get('completion_protocol') != NATURAL_COMPLETION_PROTOCOL or registry.get('candidate_runs') != 12
-            or len(entries) != 12 or {Path(row['config_path']).stem for row in entries} != expected_names
-            or state.get('status') != 'completed' or len(state.get('candidates', {})) != 12
-            or set(state['candidates']) != {Path(row['config_path']).stem for row in entries}
-            or any(row.get('status') != 'completed' for row in state['candidates'].values())):
-        raise ValueError('All twelve amended candidates must have completed before G1 selected-run extraction')
-    validate_completed_panel(state, entries)
-    if (selection.get('status') != 'frozen' or selection.get('selected_reasoning_rl_candidate') != candidate
-            or not selection.get('reviewed_by') or not selection.get('rationale')
-            or selection.get('panel_status_sha256') != file_digest(paths['panel_status'])
-            or selection.get('registry_sha256') != file_digest(paths['registry'])
-            or selection.get('selection_rule') != registry.get('selection_rule')):
-        raise ValueError('An explicit separately frozen selection receipt is required; extraction never selects')
-    if registry.get('plan_sha256') != digest({key: value for key, value in registry.items() if key != 'plan_sha256'}):
-        raise ValueError('Frozen registry content hash mismatch')
-    entry = next((row for row in entries if Path(row['config_path']).stem == candidate), None)
-    if not entry or entry.get('config_sha256') != file_digest(paths['config']):
-        raise ValueError('Selected candidate config does not match the frozen registry')
-    lineage = completion_lineage(paths, binding, state, registry, entry)
-    selected_state = state['candidates'][candidate]
-    if (selected_state.get('config_sha256') != file_digest(paths['config']) or selected_state.get('exit_code') != 0
-            or selected_state.get('completion_receipt', {}).get('completed_optimizer_steps') != 2000
-            or selected_state.get('completion_receipt', {}).get('observed_worlds') != 2000
-            or selected_state.get('completion_receipt', {}).get('completion_protocol') != NATURAL_COMPLETION_PROTOCOL):
-        raise ValueError('Completed panel records a different selected config')
-    for role, filename in (('run_manifest', 'run_manifest.json'), ('predictions', 'checkpoint_predictions.jsonl'),
-                           ('learning_evidence', 'g1_learning_evidence.json')):
-        if selected_state.get('artifacts', {}).get(filename, {}).get('sha256') != file_digest(paths[role]):
-            raise ValueError('Selected run artifact differs from completed panel receipt')
+def observed_candidate_inputs(paths, selected_state, provenance):
+    """Validate original saved observations and weights without choosing a run."""
     manifest, receipt = read(paths['run_manifest']), read(paths['learning_evidence'])
     config = read(paths['config'])
     if (manifest.get('status') != 'complete' or manifest.get('config') != config
@@ -264,8 +218,6 @@ def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
     if corpus.get('files', {}).get('evaluation/development__clean.jsonl', {}).get('sha256') != file_digest(paths['development']):
         raise ValueError('Development rows do not match the frozen corpus')
     predictions, development = read_jsonl(paths['predictions']), read_jsonl(paths['development'])
-    provenance = {'binding': reference(binding_path), **{key: reference(path) for key, path in paths.items()},
-                  'source_commit': binding['source_commit'], 'completion_source_lineage': lineage, 'purpose': PURPOSE}
     traces, mappings = extract(predictions, development, config, provenance)
     adapters = {}
     run_root = paths['run_manifest'].parent
@@ -282,6 +234,53 @@ def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
         if (adapters[str(adapter)] != row['adapter_sha256']
                 or selected_state['completion_receipt']['matching_adapter_sha256'].get(str(adapter)) != adapters[str(adapter)]):
             raise ValueError('Observed matching adapter differs from a raw row or original completion receipt')
+    return traces, mappings, adapters, development
+
+
+def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
+    if purpose != PURPOSE:
+        raise ValueError('This helper cannot prepare replay or Test 2 evidence')
+    if Path(output).exists():
+        raise FileExistsError('G1 editor input output already exists; no overwrite')
+    binding_path = Path(binding_path).resolve()
+    if file_digest(binding_path) != expected_sha:
+        raise ValueError('Input binding hash mismatch')
+    binding = read(binding_path)
+    if binding.get('purpose') != PURPOSE or binding.get('scope') != 'selected_reasoning_rl_after_complete_panel':
+        raise ValueError('Require an explicitly selected run after the complete amended pilot panel')
+    paths = {key: bound(binding.get(key, {}), binding_path.parent, key) for key in ROLES}
+    registry, state = (read(paths[key]) for key in ('registry', 'panel_status'))
+    selection = verify_panel_selection(paths['selection'], binding['selection']['sha256'])
+    candidate = binding.get('candidate_name')
+    entries = registry.get('candidates', [])
+    if selection['selected_reasoning_rl_candidate'] != candidate:
+        raise ValueError('Extraction must use the recomputed selected reasoning-RL candidate')
+    for role in ('panel_status', 'registry', 'candidate_execution_binding', 'batch_frozen_inputs',
+                 'execution_environment', 'corpus_manifest', 'development'):
+        if bound(selection[role], paths['selection'].parent, 'selection ' + role) != paths[role]:
+            raise ValueError('Extraction differs from the recomputed selection: ' + role)
+    if (selection['selected_configs']['reasoning_rl'] != reference(paths['config'])
+            or selection['selected_run_evidence']['reasoning_rl'] != reference(paths['learning_evidence'])):
+        raise ValueError('Extraction substituted the computed winning config or run')
+    if registry.get('plan_sha256') != digest({key: value for key, value in registry.items() if key != 'plan_sha256'}):
+        raise ValueError('Frozen registry content hash mismatch')
+    entry = next((row for row in entries if Path(row['config_path']).stem == candidate), None)
+    if not entry or entry.get('config_sha256') != file_digest(paths['config']):
+        raise ValueError('Selected candidate config does not match the frozen registry')
+    lineage = completion_lineage(paths, binding, state, registry, entry)
+    selected_state = state['candidates'][candidate]
+    if (selected_state.get('config_sha256') != file_digest(paths['config']) or selected_state.get('exit_code') != 0
+            or selected_state.get('completion_receipt', {}).get('completed_optimizer_steps') != 2000
+            or selected_state.get('completion_receipt', {}).get('observed_worlds') != 2000
+            or selected_state.get('completion_receipt', {}).get('completion_protocol') != NATURAL_COMPLETION_PROTOCOL):
+        raise ValueError('Completed panel records a different selected config')
+    for role, filename in (('run_manifest', 'run_manifest.json'), ('predictions', 'checkpoint_predictions.jsonl'),
+                           ('learning_evidence', 'g1_learning_evidence.json')):
+        if selected_state.get('artifacts', {}).get(filename, {}).get('sha256') != file_digest(paths[role]):
+            raise ValueError('Selected run artifact differs from completed panel receipt')
+    provenance = {'binding': reference(binding_path), **{key: reference(path) for key, path in paths.items()},
+                  'source_commit': binding['source_commit'], 'completion_source_lineage': lineage, 'purpose': PURPOSE}
+    traces, mappings, adapters, development = observed_candidate_inputs(paths, selected_state, provenance)
     edits = prepare_edit_manifest(traces, development, max_worlds=120, seed=2026, stage='pilot')
     plan = prepare_generation_plan(edits, **EDITOR)
     output = Path(output)
@@ -293,10 +292,10 @@ def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
                     'adapter_sha256': adapters, 'observed_prompt_ids': False, 'generated_editor_outputs': False,
                     'scientific_gate_decision': None, 'selection_performed': False}}
     for name, value in artifacts.items():
-        with (output / name).open('x') as stream:
+        with (output / name).open('x', encoding='utf-8', newline='\n') as stream:
             json.dump(value, stream, indent=2, sort_keys=True)
             stream.write('\n')
-    with (output / 'edit_only_sources.jsonl').open('x') as stream:
+    with (output / 'edit_only_sources.jsonl').open('x', encoding='utf-8', newline='\n') as stream:
         for trace in traces:
             stream.write(json.dumps(trace, sort_keys=True) + '\n')
     prepared = {'schema_version': 1, 'purpose': PURPOSE,
@@ -305,6 +304,62 @@ def prepare(binding_path, expected_sha, output, *, purpose=PURPOSE):
     prepared['prepared_sha256'] = digest(prepared)
     _write_new(output / 'prepared.json', prepared)
     return {**prepared, 'prepared': reference(output / 'prepared.json')}
+
+
+def inspect_completed_candidate(execution_binding, expected_sha, panel_status, candidate, output):
+    """Inspect one finished candidate before selection, without preparing editor inputs.
+
+    This deliberately does not produce prepared.json, a generation plan or G1
+    eligibility. The full panel and computed selection remain necessary later.
+    All nine native adapter files must still be present at their original paths.
+    """
+    output = Path(output)
+    if output.exists():
+        raise FileExistsError('Candidate inspection output already exists')
+    original_path, status_path = Path(execution_binding).resolve(), Path(panel_status).resolve()
+    if file_digest(original_path) != expected_sha:
+        raise ValueError('Original execution binding hash mismatch')
+    original, state = read(original_path), read(status_path)
+    paths = {'candidate_execution_binding': original_path, 'panel_status': status_path,
+             'batch_frozen_inputs': status_path.parent / 'frozen-inputs.json'}
+    for role in ('registry', 'execution_environment', 'corpus_manifest', 'development'):
+        paths[role] = bound(original.get(role, {}), original_path.parent, role)
+    registry = read(paths['registry'])
+    if registry.get('plan_sha256') != digest({key: value for key, value in registry.items() if key != 'plan_sha256'}):
+        raise ValueError('Frozen registry content hash mismatch')
+    entry = next((row for row in registry.get('candidates', [])
+                  if Path(row['config_path']).stem == candidate), None)
+    if entry is None or entry.get('arm') != 'reasoning_rl':
+        raise ValueError('Inspection requires one registered reasoning-RL candidate')
+    current = state.get('candidates', {}).get(candidate, {})
+    if current.get('status') != 'completed':
+        raise ValueError('Candidate is not completed; preserve existing records and inspect after completion')
+    validate_completed_panel(state, [entry])
+    paths['config'] = bound({'path': entry['config_path'], 'sha256': entry['config_sha256']},
+                            paths['registry'].parent, 'config')
+    for role, filename in (('run_manifest', 'run_manifest.json'),
+                           ('predictions', 'checkpoint_predictions.jsonl'),
+                           ('learning_evidence', 'g1_learning_evidence.json')):
+        paths[role] = bound(current.get('artifacts', {}).get(filename, {}), status_path.parent, role)
+    source = read(paths['execution_environment']).get('source', {}).get('commit')
+    lineage = completion_lineage(paths, {'source_commit': source}, state, registry, entry)
+    provenance = {**{key: reference(path) for key, path in paths.items()},
+                  'source_commit': source, 'completion_source_lineage': lineage, 'purpose': PURPOSE}
+    before = {key: file_digest(path) for key, path in paths.items()}
+    traces, mappings, adapters, _ = observed_candidate_inputs(paths, current, provenance)
+    if before != {key: file_digest(path) for key, path in paths.items()}:
+        raise ValueError('Candidate inputs changed during inspection')
+    report = {'schema_version': 1, 'kind': 'completed_candidate_extraction_inspection',
+              'observed_utc': datetime.now(timezone.utc).isoformat(), 'candidate_name': candidate,
+              'provenance': provenance, 'source_records': len(traces),
+              'native_checkpoints': 9, 'stories_per_checkpoint': 120,
+              'artifact_ids_sha256': digest([row['artifact_id'] for row in mappings]),
+              'adapter_sha256': adapters, 'editor_launched': False,
+              'selection_performed': False, 'selected_run_claim': False,
+              'g1_eligible': False, 'scientific_gate_decision': None}
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _write_new(output, report)
+    return {**report, 'receipt': reference(output)}
 
 
 def editor_evidence(plan_path, generated_path, mappings):
@@ -325,7 +380,7 @@ def editor_evidence(plan_path, generated_path, mappings):
 
 
 def _write_new(path, value):
-    with Path(path).open('x', encoding='utf-8') as stream:
+    with Path(path).open('x', encoding='utf-8', newline='\n') as stream:
         json.dump(value, stream, indent=2, sort_keys=True, allow_nan=False)
         stream.write('\n')
         stream.flush()
@@ -510,45 +565,98 @@ def _journal_rows(path, plan):
     return rows
 
 
+class _CallStartWriteFailure(BaseException):
+    """A call cannot proceed without a durable start record; never an edit error."""
+
+
+def _validate_call_starts(started, completed, plan, ordered):
+    starts = read_jsonl(started) if Path(started).exists() else []
+    if ([row['artifact_id'] for row in completed] != ordered[:len(completed)]
+            or len(starts) != len(completed)):
+        raise ValueError('G1 has an interrupted unresolved call or noncanonical journal; no resampling')
+    for begin, contract in zip(starts, completed):
+        expected = {'artifact_id': contract['artifact_id'],
+                    'prompt_sha256': contract['generation']['prompt_sha256'],
+                    'plan_sha256': plan['plan_sha256']}
+        if begin != expected:
+            raise ValueError('G1 call-start record differs from its durable completed result')
+
+
 def generate(prepared_path, expected_sha, output, *, device='auto', resume=False, max_calls=None, backend=None):
     """Run/resume the frozen editor; optional call limit measures this same job.
 
-    Every completed result, including malformed/failed output, is fsynced to the
-    existing editor journal and never resampled. A partial final journal line is
-    rejected rather than silently discarded. No scientific approval is issued.
+    One permanent claim and OS lock cover the preparation, across output paths.
+    Every call start and completed result is fsynced. An interrupted in-flight
+    call, partial journal line or alternate output cannot be silently resampled.
+    No scientific approval is issued.
     """
     _, files, plan, manifest, traces, _ = _prepared(prepared_path, expected_sha)
     if max_calls is not None and (type(max_calls) is not int or max_calls < 1):
         raise ValueError('max_calls must be a positive bounded profile count')
     output = Path(output).resolve()
     journal, claim = Path(str(output) + '.journal.jsonl'), Path(str(output) + '.job.json')
+    started = Path(str(output) + '.started.jsonl')
+    prepared_path = Path(prepared_path).resolve()
+    owner = Path(str(prepared_path) + '.generation.job.json')
+    lock = Path(str(prepared_path) + '.generation.lock')
     if output.exists():
         raise FileExistsError('Generated G1 batch already exists; no overwrite or resampling')
     output.parent.mkdir(parents=True, exist_ok=True)
-    with _job_lock(Path(str(output) + '.lock')):
+    with _job_lock(lock):
         if output.exists():
             raise FileExistsError('Generated G1 batch already exists')
-        if journal.exists() != resume or claim.exists() != resume:
+        if any(path.exists() != resume for path in (journal, claim, started, owner)):
             raise ValueError('Existing G1 journal/claim requires explicit resume; fresh job must omit resume')
         identity = {'schema_version': 1, 'purpose': PURPOSE, 'prepared': reference(prepared_path),
             'generation_plan': reference(files['editor_plan.json']), 'output': str(output),
             'attention_implementation': 'sdpa', 'source_generation': 'none_saved_completions_only'}
-        if resume and read(claim) != identity:
+        if resume and (read(claim) != identity or read(owner) != identity):
             raise ValueError('G1 journal belongs to different prepared inputs/output')
         completed = _journal_rows(journal, plan)
+        ordered = [contract['artifact_id'] for contract in manifest['edits']]
+        _validate_call_starts(started, completed, plan, ordered)
         if not resume:
+            _write_new(owner, identity)
             _write_new(claim, identity)
         calls = 0
         paused = False
-        with journal.open('a' if resume else 'x', encoding='utf-8') as stream:
-            # Create the journal before loading: a loading failure is resumable
-            # and cannot strand an exclusive claim without its empty journal.
-            stream.flush()
-            os.fsync(stream.fileno())
+        with journal.open('a' if resume else 'x', encoding='utf-8', newline='\n') as stream, \
+                started.open('a' if resume else 'x', encoding='utf-8', newline='\n') as begin_stream:
+            # Create both journals before loading. Loading failure can resume
+            # with no call starts; an interrupted actual call cannot.
+            for handle in (stream, begin_stream):
+                handle.flush()
+                os.fsync(handle.fileno())
             if len(completed) == len(traces):
                 editor = _JournalOnlyEditor(completed, plan)
             else:
-                editor = _MeasuredEditor(backend if backend is not None else SDPAEditor(device=device))
+                measured = _MeasuredEditor(backend if backend is not None else SDPAEditor(device=device))
+
+                class ClaimedEditor:
+                    checkpoint_id, revision, tokenizer = measured.checkpoint_id, measured.revision, measured.tokenizer
+
+                    def token_ids(self, text):
+                        return measured.token_ids(text)
+
+                    @property
+                    def last_measurement(self):
+                        return measured.last_measurement
+
+                    def generate(self, prompt, **kwargs):
+                        begin = {'artifact_id': ordered[len(completed) + calls],
+                                 'prompt_sha256': digest(prompt), 'plan_sha256': plan['plan_sha256']}
+                        try:
+                            begin_stream.write(json.dumps(begin, sort_keys=True, allow_nan=False) + '\n')
+                            begin_stream.flush()
+                            os.fsync(begin_stream.fileno())
+                        except Exception as error:
+                            # The generic editor catches ordinary backend errors;
+                            # a journal failure must instead stop the job before
+                            # any unrecorded inference or subsequent contract.
+                            raise _CallStartWriteFailure(str(error)) from error
+                        return measured.generate(prompt, **kwargs)
+
+                editor = ClaimedEditor()
             def persist(contract):
                 nonlocal calls
                 measurement = editor.last_measurement
@@ -570,16 +678,21 @@ def generate(prepared_path, expected_sha, output, *, device='auto', resume=False
                     on_result=persist, completed_results=completed)
             except _ProfilePause:
                 paused = True
+        durable = _journal_rows(journal, plan)
+        _validate_call_starts(started, durable, plan, ordered)
         if not paused:
             # Reassemble from the durable records: persistence attaches resource
             # metadata even when the underlying call failed, and the generic
             # generator callback intentionally receives a defensive copy.
-            durable = _journal_rows(journal, plan)
-            result = generate_edit_controls(editor, traces, manifest, plan, completed_results=durable)
+            if len(durable) != len(traces):
+                raise ValueError('Incomplete durable G1 journal cannot publish a final batch')
+            result = generate_edit_controls(_JournalOnlyEditor(durable, plan), traces, manifest, plan,
+                                            completed_results=durable)
             _write_new(output, result)
         report = resource_report(prepared_path, expected_sha, journal_path=journal)
         return {'status': 'paused_after_requested_calls' if paused else 'complete',
                 'new_calls': calls, 'journal': reference(journal),
+                'started': reference(started), 'preparation_claim': reference(owner),
                 'generated': reference(output) if output.exists() else None,
                 'resources': report, 'scientific_gate_decision': None, 'human_audit': 'not_performed'}
 

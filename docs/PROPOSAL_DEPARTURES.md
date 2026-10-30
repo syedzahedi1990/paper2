@@ -50,3 +50,7 @@ Controlled-world answers use inventory letters A–F rather than Paper 1's locat
 ## Historical implementations
 
 Versions 0.3–0.5 introduced heuristic screening bounds, matching tolerance ±0.02, an editable-story/interval-width criterion, numerical edit-audit acceptance and a positive residual point-estimate check. Those historical rules are recorded in the correction history for provenance; **none is part of the v0.6 analysis or pilot decision rule**. Old calibration and edit/audit lineages must not silently inherit the revised protocol. Frozen hashes, complete panels and the named reviewers' actual decisions remain required.
+
+## Descriptive editor diagnostics and executable selection
+
+G1 now includes frozen-editor classifications of all 1,080 saved native traces from the selected reasoning-RL candidate, an additional descriptive diagnostic with no pass mark. The [30 October editor/selection addendum](amendments/2026-10-30-editor-and-selection.md) replaces model-counted offsets with exact quoted spans before editor outputs, specifies a twelve-training-oracle mechanical calibration, and freezes failure treatment before amended candidate failures. Test 2 retains a separate full-provenance edit batch and named human audit. Computed final-native selection and confirmatory family-rate binding implement the existing objective; they do not add an empirical threshold.

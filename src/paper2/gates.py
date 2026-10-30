@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 from .io import file_digest, write_json
 from .training.selection import assert_current_design
+from .training.confirmatory_selection import verify_confirmatory_selection
 
 GATES = ("G0", "G1", "G2", "G3", "G4")
 G4_LAYER_POLICY = "all_after_embedding_layer"
@@ -425,6 +426,12 @@ def _training_evidence(config_dict, gate_file, profile_report, *, historical=Fal
     if not 0 <= profile["truncation_rate"] <= 1:
         raise ValueError("Profiling truncation rate must be between zero and one")
     if paid_required:
+        if not historical:
+            # Reference configs are deliberately provisional. Recompute the
+            # family winners from actual panel scores before any confirmation
+            # launch, including a target-size resource profile.
+            review["validated_development_selection"] = verify_confirmatory_selection(
+                config_dict, review, path.parent)
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
         verify_g1_learning_curves(review["gates"]["G1"], path.parent,

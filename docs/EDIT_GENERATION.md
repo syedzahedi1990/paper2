@@ -4,7 +4,7 @@ Primary confirmatory edits use `direct_fixed`: one native direct-question trace 
 
 ## Freeze and generate
 
-Save every source trace, including incorrect answers and empty traces. `prepare-edits` freezes candidate IDs and oracle destinations/forecasts for every possible trace-stated location. `plan-edit-generation` freezes the editor model and immutable revision, prompt v3, decoding, output budget, random sample and seed. The editor paraphrases the trace without correcting it, finds the focal belief **actually stated**, replaces just its location, and supplies an irrelevant wording edit. The belief may be wrong. A destination differs from both the stated location and the true belief; frozen deterministic alternatives avoid no-op edits. Existing answer statements stay; new answer statements cannot be introduced.
+Save every source trace, including incorrect answers and empty traces. `prepare-edits` freezes candidate IDs and oracle destinations/forecasts for every possible trace-stated location. `plan-edit-generation` freezes the editor model and immutable revision, prompt v4, decoding, output budget, random sample and seed. The editor paraphrases the trace without correcting it, finds the focal belief **actually stated**, replaces just its location, and supplies an irrelevant wording edit. The belief may be wrong. A destination differs from both the stated location and the true belief; frozen deterministic alternatives avoid no-op edits. Existing answer statements stay; new answer statements cannot be introduced.
 
 ```bash
 paper2 prepare-edits --traces runs/traces-base-fixed.jsonl runs/traces-trained-fixed.jsonl \
@@ -20,13 +20,13 @@ paper2 generate-edits --edits runs/edit-templates.json --plan runs/edit-generati
 paper2 prepare-edit-audit --edits runs/generated-edits.json --output runs/edit-audit.json
 ```
 
-The editor above is an example requiring G3 validation, not a pre-approved model. For confirmation substitute confirmation rows, include all intended sources and use `--stage confirmatory` without a subset. Complete eight-view panels are required. Resume interrupted generation with `--resume`; finished journal records are never resampled, including unusable/failed records. New protocol-v3 plans/audits require a fresh frozen lineage; old certificates cannot authorize the changed method.
+The editor above is an example requiring G3 validation, not a pre-approved model. For confirmation substitute confirmation rows, include all intended sources and use `--stage confirmatory` without a subset. Complete eight-view panels are required. Resume interrupted generation with `--resume`; finished journal records are never resampled, including unusable/failed records. New prompt-v4 plans require a fresh frozen lineage; historical v3 plans and journals remain valid under their original prompt and parser. The statistical human-audit protocol is unchanged.
 
 ## Outcomes and validity
 
-Preserve every candidate. Report editable, belief not stated, ambiguous, contradicted, no safe control, and operational generation failure separately. Incorrect source answers do not imply noneditability; correct answers do not prove the belief was stated. Missing or contradictory beliefs are results, not batch failures. Malformed/truncated editor output is an operational failure, not evidence about the model's belief. Neither kind receives an edited control, but both retain original rows and candidate denominators.
+Preserve every candidate. The batch reports generation failures by machine-readable cause, including missing/ambiguous quotations, JSON/schema errors, invalid or overlapping edits, leakage, truncation and backend failures. Report editable, belief not stated, ambiguous, contradicted, no safe control, and operational generation failure separately. Incorrect source answers do not imply noneditability; correct answers do not prove the belief was stated. Missing or contradictory beliefs are results, not batch failures. Malformed/truncated editor output is an operational failure, not evidence about the model's belief. Neither kind receives an edited control, but both retain original rows and candidate denominators.
 
-Machine checks enforce exact source spans, one frozen location substitution, nonoverlap, valid output structure, immutable identities and recognized answer-label leakage patterns. **Comparable length is reviewed, not decided by a .5–2 ratio.** Paraphrase/original and irrelevant/semantic length ratios are recorded. The finite-pattern answer filter cannot establish semantic fidelity; human checks cover meaning, length comparability, focal fact, neutrality and forecast applicability.
+The model quotes the exact text to replace in each edit as `{old, new}`. Code finds its unique literal occurrence and supplies offsets. Missing or repeated quotations are distinct operational failures; it never chooses an occurrence for the model. Bare JSON or one complete Markdown JSON fence is accepted. Machine checks enforce exact source spans, one frozen location substitution, nonoverlap, valid output structure, immutable identities and recognized answer-label leakage patterns. **Comparable length is reviewed, not decided by a .5–2 ratio.** Paraphrase/original and irrelevant/semantic length ratios are recorded. The finite-pattern answer filter cannot establish semantic fidelity; human checks cover meaning, length comparability, focal fact, neutrality and forecast applicability.
 
 A named human records every required judgment for the frozen random sample. Known flawed sampled controls or outcome classifications require a documented correction and re-review before use; a correction may instead classify the artifact as noneditable. This is completion of a validity check, not a limit on the number of flaws. Keep original judgments and raw model outputs unchanged. Put the replacement structured controls/classification, reason, reviewer and completed checks in the audit item's `correction` object. No model resampling is allowed to obtain a more favorable batch. Unsampled controls are not individually approved.
 
@@ -52,3 +52,24 @@ Pass the same `--edits` and `--edit-audit` files to both `regenerate-traces` and
 Report per-arm editability with story intervals, conditional edit effects, candidate/eligible counts and common-support comparisons. Different arms can have different eligible populations; these are not unconditional treatment effects. Average fixed seeds within story before 20,000 whole-story resamples. No editable count, precision flag or quadrant classification is emitted.
 
 [Lanham et al. (2023), §§2.4 and 2.6](https://arxiv.org/html/2307.13702v1) motivates model-generated edits/paraphrases and source-generated continuations. Our oracle contracts, irrelevant edits, explicit editability outcomes and sampled review are disclosed study choices. The [preregistration](PREREGISTRATION.md) defines the estimands and positive controls.
+
+## Prospective training-oracle calibration
+
+Before study editor calls, prepare twelve deterministic clean training oracle traces, with no development or confirmation outcomes:
+
+```bash
+paper2 editor-calibration prepare \
+  --training data/generated/release-audit-v5/training/clean.jsonl \
+  --worlds data/generated/release-audit-v5/worlds/train.jsonl \
+  --corpus-manifest data/generated/release-audit-v5/manifest.json \
+  --output runs/editor-training-calibration
+paper2 editor-calibration generate \
+  --input runs/editor-training-calibration/preparation.json --sha256 PREPARATION_SHA256 \
+  --output runs/editor-training-calibration/generated.json
+paper2 editor-calibration report \
+  --input runs/editor-training-calibration/preparation.json --sha256 PREPARATION_SHA256 \
+  --batch runs/editor-training-calibration/generated.json \
+  --output runs/editor-training-calibration/report.json
+```
+
+Preparation binds the training files, corpus and exact source. Generation uses the fixed study editor with SDPA and journals every attempted call; no source model is loaded. A recorded result is never resampled, and an interrupted call with unknown outcome blocks automatic retry. Report every mechanical outcome and inspect the raw controls, without inventing an acceptance percentage. Oracle calibration does not establish semantic validity on model-generated traces or substitute for a human audit. The [dated addendum](amendments/2026-10-30-editor-and-selection.md) records its timing and scope.

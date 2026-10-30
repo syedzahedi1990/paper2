@@ -19,6 +19,8 @@ def reviewed(tmp_path, monkeypatch):
     monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", lambda *_, **__: None)
+    # Selection is separately tested against actual deterministic panel receipts.
+    monkeypatch.setattr("paper2.gates.verify_confirmatory_selection", lambda *_, **__: None)
     # Original-model fixtures isolate the pre-existing evidence/cost checks.
     # Current amendment eligibility is tested independently without this stub.
     monkeypatch.setattr("paper2.gates.assert_current_design", lambda *_: None)
@@ -256,3 +258,14 @@ def test_full_training_cannot_use_another_arms_profile(reviewed):
 def test_target_size_bootstrap_profile_can_use_prior_pilot_arm_profile(reviewed):
     gate, report, _, _ = reviewed
     assert_training_allowed(request('confirmatory', arm='reasoning_sft', profile=True, target_profile_bootstrap=True), gate, report)
+
+
+def test_confirmatory_profiles_also_require_computed_selection(reviewed, monkeypatch):
+    gate, report, _, _ = reviewed
+    def reject(*_, **__):
+        raise ValueError('Confirmatory runs require a bound computed development_selection receipt')
+    monkeypatch.setattr('paper2.gates.verify_confirmatory_selection', reject)
+    with pytest.raises(ValueError, match='computed development_selection'):
+        assert_training_allowed(request('confirmatory', profile=True, target_profile_bootstrap=True), gate, report)
+    # The candidate panel itself must continue without a circular selection dependency.
+    assert_training_allowed(request('pilot'), gate, report)

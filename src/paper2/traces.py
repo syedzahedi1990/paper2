@@ -487,8 +487,8 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
     continuation, even with the same random seed, is a different intervention.
     """
     traces = list(traces)
-    if any(trace.get("purpose") == "g1_editability_only" for trace in traces):
-        raise ValueError("G1 editability-only sources lack replay provenance and cannot enter Test 2 regeneration")
+    if any(trace.get("purpose") in {"g1_editability_only", "editor_oracle_calibration"} for trace in traces):
+        raise ValueError("G1 editability-only and oracle-calibration sources lack replay provenance and cannot enter Test 2 regeneration")
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
     batch_review = _batch_review(edits, edit_audit)
@@ -566,8 +566,8 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                        regenerated=None, edit_audit=None):
     """Read identical saved source text in every cell; never generate here."""
     traces = list(traces)
-    if any(trace.get("purpose") == "g1_editability_only" for trace in traces):
-        raise ValueError("G1 editability-only sources lack replay provenance and cannot enter Test 2 readers")
+    if any(trace.get("purpose") in {"g1_editability_only", "editor_oracle_calibration"} for trace in traces):
+        raise ValueError("G1 editability-only and oracle-calibration sources lack replay provenance and cannot enter Test 2 readers")
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
     batch_review = _batch_review(edits, edit_audit, required=bool(set(conditions) & EDIT_CONTROLS))

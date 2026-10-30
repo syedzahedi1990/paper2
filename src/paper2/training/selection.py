@@ -16,6 +16,24 @@ SCHEDULES = (("constant", 0.0),)
 LEGACY_SCHEDULES = (("constant", 0.0), ("constant_with_warmup", 0.05))
 
 
+def selection_failure_policy():
+    """Prospective eligibility policy, separate from the unchanged frozen rule.
+
+    This specification is not a gate decision or permission to retry a failed
+    run. Freeze a dated, attributed copy before observing any panel failure.
+    """
+    return {
+        "method": "terminal_attempts_complete_settings_v1",
+        "panel": "All twelve frozen candidates must have actual terminal attempts; unattempted or running candidates block selection",
+        "rl": "A shared RL setting is eligible only when both reasoning_rl and answer_rl completed valid full-exposure runs",
+        "sft": "A SFT setting is eligible only when label_sft completed a valid full-exposure run",
+        "failures": "Retain failed attempts, statuses, reasons, launch logs and artifact receipts; report excluded settings; never assign a fabricated zero score",
+        "minimum": "At least one eligible shared RL setting and one eligible SFT setting are required",
+        "retries": "No retries, favorable replacement, dropped unattempted candidates or expanded search are authorized",
+        "selection_rule": "The original final-native family objective and deterministic tie-breaks remain unchanged",
+    }
+
+
 def amended_experiment_matrix(stage):
     """Current reference configs, not selected rates or permission to train.
 

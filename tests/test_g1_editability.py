@@ -4,6 +4,7 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import random
+import shutil
 
 import pytest
 
@@ -13,9 +14,19 @@ from paper2.gates import _g1_editor_measurements
 from paper2.io import digest, file_digest
 from paper2.training.config import TrainingConfig
 from paper2.training.data import natural_completion_outcome
-from paper2.training.selection import development_selection_spec, MODEL_AMENDMENT_SHA256
+from paper2.training.selection import MODEL_AMENDMENT_SHA256
+from paper2.training.selection_results import freeze_panel_selection
+from panel_fixture import make_panel_fixture
 
 from paper2.training import g1_editability as helper
+
+
+@pytest.fixture(autouse=True)
+def remove_this_tests_full_panel(tmp_path):
+    # Full CPU panels are disposable test inputs, not experiment evidence. Keep
+    # only the small test outputs instead of accumulating gigabytes per suite.
+    yield
+    shutil.rmtree(tmp_path / 'panel', ignore_errors=True)
 
 
 def write(path, value):
@@ -144,7 +155,7 @@ def test_existing_editor_and_g1_accept_truthful_edit_only_sources_without_replay
     raw = [row for row in predictions if row['step'] == 0 and row['id'] in record_ids]
     manifest = helper.prepare_edit_manifest(traces, rows, max_worlds=120, seed=2026, stage='pilot')
     plan = prepare_generation_plan(manifest, **helper.EDITOR)
-    assert plan['prompt_version'] == 'paper2.trace_controls.v3'
+    assert plan['prompt_version'] == helper.PROMPT_VERSION
     assert plan['decoding']['max_new_tokens'] == 2048 and plan['decoding']['seed'] == 2026
     batch = generate_edit_controls(FakeEditor(), traces, manifest, plan)
     assert len(validate_generated_batch(batch)) == 2
@@ -160,71 +171,29 @@ def test_existing_editor_and_g1_accept_truthful_edit_only_sources_without_replay
         helper.editor_evidence(plan_path, batch_path, mappings[:1])
 
 
-@pytest.fixture
-def file_fixture(observed_fixture, tmp_path):
-    config, development, original = observed_fixture
-    predictions = deepcopy(original)
-    root = tmp_path / 'run'
-    for row in predictions:
-        checkpoint = root / 'evaluated_checkpoints' / f"checkpoint-{row['step']}"
-        weights = checkpoint / 'adapter_model.safetensors'
-        if not weights.exists():
-            weights.parent.mkdir(parents=True)
-            weights.write_bytes(f"synthetic {row['step']}".encode())
-        row.update(checkpoint_id=str(checkpoint), checkpoint_path=str(checkpoint), path=str(checkpoint), adapter_sha256=file_digest(weights))
-    dev_path = jsonl(tmp_path / 'development.jsonl', development)
-    corpus = write(tmp_path / 'corpus.json', {'files': {'evaluation/development__clean.jsonl': helper.reference(dev_path)}})
-    config_path = write(tmp_path / 'reasoning_rl_clean_seed1_lr-x1_constant.json', config)
-    run_manifest = write(root / 'run_manifest.json', {'status': 'complete', 'config': config,
-        'resume_from_checkpoint': None, 'synthetic_integration_test': False, 'corpus_manifest_sha256': file_digest(corpus)})
-    raw = jsonl(root / 'checkpoint_predictions.jsonl', predictions)
-    receipt = write(root / 'g1_learning_evidence.json', {'schema_version': 3, 'run_status': 'complete',
-        'completion_protocol': helper.NATURAL_COMPLETION_PROTOCOL,
-        'artifacts': {'manifest': helper.reference(run_manifest), 'predictions': helper.reference(raw)}})
-    names = [f'{arm}_clean_seed1_lr-x{rate}_constant' for arm in ('reasoning_rl', 'answer_rl', 'label_sft') for rate in (1, 3, 10, 30)]
-    candidate = names[0]
-    registry_doc = {'schema_version': 2, 'panel': 'four_rates_constant',
-        'beta_by_arm': {'reasoning_rl': .04, 'answer_rl': .04, 'label_sft': 0.},
-        'completion_protocol': helper.NATURAL_COMPLETION_PROTOCOL, 'candidate_runs': 12,
-        'selection_rule': development_selection_spec()['selection'], 'candidates': [
-            {'config_path': name + '.json', 'config_sha256': file_digest(config_path),
-             'arm': name.split('_clean_')[0]} for name in names]}
-    registry_doc['plan_sha256'] = digest(registry_doc)
-    registry = write(tmp_path / 'registry.json', registry_doc)
-    environment = write(tmp_path / 'environment.json', {'source': {'commit': 'a' * 40},
-        'wrapper': {'sha256': 'b' * 64}})
-    decision = write(tmp_path / 'resource-decision.json', {'source_commit': 'a' * 40,
-        'execution_environment_sha256': file_digest(environment)})
-    original_files = dict(execution_environment=environment, registry=registry, corpus_manifest=corpus,
-                          development=dev_path, decision=decision)
-    original = write(tmp_path / 'candidate-execution-binding.json', {
-        'schema_version': 2, 'purpose': 'amended_pilot_candidate_execution',
-        'completion_protocol': helper.NATURAL_COMPLETION_PROTOCOL,
-        'beta_by_arm': {'reasoning_rl': .04, 'answer_rl': .04, 'label_sft': 0.},
-        'config_sha256': {row['config_path']: row['config_sha256'] for row in registry_doc['candidates']},
-        **{role: helper.reference(path) for role, path in original_files.items()}})
-    frozen = write(tmp_path / 'frozen-inputs.json', {'binding_sha256': file_digest(original),
-        'wrapper_sha256': 'b' * 64, 'files_sha256': {str(path): file_digest(path)
-            for path in (original, config_path, *original_files.values())}})
-    matching = {str(path): file_digest(path) for path in root.glob('evaluated_checkpoints/*/adapter_model.safetensors')}
-    state = write(tmp_path / 'status.json', {'status': 'completed', 'binding_sha256': file_digest(original),
-        'candidates': {name: {'status': 'completed', 'config_sha256': file_digest(config_path), 'exit_code': 0,
-            'completion_receipt': {'completed_optimizer_steps': 250 if name.startswith('label_sft') else 2000,
-                'observed_worlds': 2000, 'completion_protocol': helper.NATURAL_COMPLETION_PROTOCOL,
-                'matching_adapter_sha256': matching, 'final_adapter_sha256': 'c' * 64},
-            'artifacts': {path.name: helper.reference(path) for path in (run_manifest, raw, receipt)}} for name in names}})
-    selection = write(tmp_path / 'selection.json', {'status': 'frozen', 'selected_reasoning_rl_candidate': candidate,
-        'reviewed_by': 'Offline fixture, no approval', 'rationale': 'Synthetic only',
-        'panel_status_sha256': file_digest(state), 'registry_sha256': file_digest(registry),
-        'selection_rule': registry_doc['selection_rule']})
-    paths = dict(selection=selection, panel_status=state, registry=registry, config=config_path,
-        run_manifest=run_manifest, predictions=raw, learning_evidence=receipt, development=dev_path,
-        corpus_manifest=corpus, execution_environment=environment,
-        candidate_execution_binding=original, batch_frozen_inputs=frozen)
-    binding = write(tmp_path / 'binding.json', {'purpose': helper.PURPOSE,
+def bind_panel_for_extraction(panel, directory):
+    """Freeze the actual computed winner of twelve distinct synthetic runs."""
+    selection = directory / 'selection.json'
+    result = freeze_panel_selection(panel['binding'], file_digest(panel['binding']), panel['status'],
+        panel['policy'], file_digest(panel['policy']), selection,
+        reviewed_by='Offline fixture, no scientific approval', rationale='CPU integrity testing only')
+    candidate = result['selected_reasoning_rl_candidate']
+    root = panel['root'] / 'runs' / candidate
+    paths = dict(selection=selection, panel_status=panel['status'], registry=panel['registry'],
+        config=panel['configs'][candidate], run_manifest=root / 'run_manifest.json',
+        predictions=root / 'checkpoint_predictions.jsonl', learning_evidence=root / 'g1_learning_evidence.json',
+        development=panel['development'], corpus_manifest=panel['corpus'],
+        execution_environment=panel['environment'], candidate_execution_binding=panel['binding'],
+        batch_frozen_inputs=panel['frozen'])
+    binding = write(directory / 'binding.json', {'purpose': helper.PURPOSE,
         'scope': 'selected_reasoning_rl_after_complete_panel', 'candidate_name': candidate,
-        'source_commit': 'a' * 40, **{key: helper.reference(path) for key, path in paths.items()}})
-    return binding, paths, tmp_path / 'output'
+        'source_commit': result['source_commit'], **{key: helper.reference(path) for key, path in paths.items()}})
+    return binding, paths, directory / 'output'
+
+
+@pytest.fixture
+def file_fixture(tmp_path):
+    return bind_panel_for_extraction(make_panel_fixture(tmp_path / 'panel'), tmp_path)
 
 
 def test_prepare_requires_actual_bound_complete_selection_and_never_launches(file_fixture):
@@ -253,9 +222,7 @@ def test_rehashed_incomplete_panel_is_not_a_selected_complete_run(file_fixture):
     state = helper.read(paths['panel_status'])
     state['status'] = 'running'
     write(paths['panel_status'], state)
-    doc = helper.read(binding)
-    doc['panel_status'] = helper.reference(paths['panel_status'])
-    write(binding, doc)
+    refresh_extraction_bindings(binding, paths, 'panel_status', refresh_selection=True)
     with pytest.raises(ValueError, match='All twelve'):
         helper.prepare(binding, file_digest(binding), output)
     assert not output.exists()
@@ -306,6 +273,7 @@ def refresh_extraction_bindings(binding, paths, *roles, refresh_selection=False)
     if refresh_selection:
         selected = helper.read(paths['selection'])
         selected['panel_status_sha256'] = file_digest(paths['panel_status'])
+        selected['panel_status'] = helper.reference(paths['panel_status'])
         write(paths['selection'], selected)
         roles = (*roles, 'selection')
     doc = helper.read(binding)
@@ -327,7 +295,7 @@ def test_new_extraction_binding_cannot_substitute_completed_run_environment(file
     doc['execution_environment'] = helper.reference(paths['execution_environment'])
     doc['source_commit'] = fake['source']['commit']
     write(binding, doc)
-    with pytest.raises(ValueError, match='substituted an original frozen execution_environment'):
+    with pytest.raises(ValueError, match='substituted an original frozen execution_environment|differs from the recomputed selection'):
         helper.prepare(binding, file_digest(binding), output)
     assert not output.exists()
 
@@ -347,7 +315,7 @@ def test_rehashed_extraction_must_preserve_original_completed_lineage(file_fixtu
         doc['wrapper_sha256'] = 'f' * 64
     write(paths[role], doc)
     refresh_extraction_bindings(binding, paths, role)
-    with pytest.raises(ValueError, match='lineage|original frozen|wrapper'):
+    with pytest.raises(ValueError, match='lineage|original frozen|wrapper|modified bound|Original source|original execution binding'):
         helper.prepare(binding, file_digest(binding), output)
     assert not output.exists()
 
@@ -371,7 +339,7 @@ def test_other_candidate_completion_labels_alone_are_not_accepted(file_fixture, 
         current['completion_receipt'] = {}
     write(paths['panel_status'], state)
     refresh_extraction_bindings(binding, paths, 'panel_status', refresh_selection=True)
-    with pytest.raises(ValueError, match='Every candidate needs'):
+    with pytest.raises(ValueError, match='Every candidate needs|process/config/exit|successful supervisor|Terminal completion receipt'):
         helper.prepare(binding, file_digest(binding), output)
     assert not output.exists()
 
@@ -392,12 +360,74 @@ def test_actual_adapter_hash_must_match_completed_run_receipt_on_every_checkpoin
     state = helper.read(paths['panel_status'])
     selected = state['candidates']['reasoning_rl_clean_seed1_lr-x1_constant']
     matching = selected['completion_receipt']['matching_adapter_sha256']
-    key = next(path for path in matching if 'checkpoint-250/' in path)
+    key = next(path for path in matching if Path(path).parent.name == 'checkpoint-250')
     matching[key] = 'f' * 64
     write(paths['panel_status'], state)
     refresh_extraction_bindings(binding, paths, 'panel_status', refresh_selection=True)
-    with pytest.raises(ValueError, match='raw row or original completion receipt'):
+    with pytest.raises(ValueError, match='raw row or original completion receipt|Terminal completion receipt'):
         helper.prepare(binding, file_digest(binding), output)
+    assert not output.exists()
+
+
+def test_terminal_failure_is_retained_and_selected_completed_run_can_be_prepared(tmp_path):
+    failed_name = 'reasoning_rl_clean_seed1_lr-x30_constant'
+    panel = make_panel_fixture(tmp_path / 'panel', failures=(failed_name,))
+    failed_manifest = panel['root'] / 'runs' / failed_name / 'run_manifest.json'
+    before = file_digest(failed_manifest)
+    binding, paths, output = bind_panel_for_extraction(panel, tmp_path)
+    selected = helper.read(paths['selection'])
+    assert selected['failures'] == [failed_name]
+    assert selected['selected_reasoning_rl_candidate'] != failed_name
+    report = helper.prepare(binding, file_digest(binding), output)
+    assert report['editor_launched'] is False
+    assert len(helper.read(output / 'editor_plan.json')['contract_specs']) == 1080
+    assert file_digest(failed_manifest) == before
+
+
+def test_completed_candidate_inspection_needs_no_selection_or_editor(tmp_path, monkeypatch):
+    panel = make_panel_fixture(tmp_path / 'panel')
+    candidate = 'reasoning_rl_clean_seed1_lr-x1_constant'
+    state = helper.read(panel['status'])
+    # Match an ongoing real panel: only the first completed candidate is present.
+    state['status'] = 'running'
+    state['candidates'] = {candidate: state['candidates'][candidate]}
+    write(panel['status'], state)
+    monkeypatch.setattr(helper, 'prepare_generation_plan', lambda *a, **kw: pytest.fail('No editor plan in inspection'))
+    monkeypatch.setattr(helper, 'SDPAEditor', lambda *a, **kw: pytest.fail('No editor call in inspection'))
+    output = tmp_path / 'inspection.json'
+    before = {path: file_digest(path) for path in (panel['binding'], panel['status'], panel['frozen'])}
+    report = helper.inspect_completed_candidate(panel['binding'], file_digest(panel['binding']),
+                                                panel['status'], candidate, output)
+    assert report['source_records'] == 1080 and report['native_checkpoints'] == 9
+    assert report['stories_per_checkpoint'] == 120 and len(report['adapter_sha256']) == 9
+    assert not report['editor_launched'] and not report['selection_performed']
+    assert not report['selected_run_claim'] and not report['g1_eligible']
+    assert report['scientific_gate_decision'] is None
+    assert before == {path: file_digest(path) for path in before}
+    assert not (tmp_path / 'selection.json').exists()
+    assert not list(tmp_path.rglob('prepared.json'))
+    assert not list(tmp_path.rglob('editor_plan.json'))
+    with pytest.raises(FileExistsError):
+        helper.inspect_completed_candidate(panel['binding'], file_digest(panel['binding']),
+                                            panel['status'], candidate, output)
+
+
+@pytest.mark.parametrize('problem', ['unfinished', 'missing_adapter'])
+def test_candidate_inspection_rejects_unfinished_or_missing_native_adapter(tmp_path, monkeypatch, problem):
+    panel = make_panel_fixture(tmp_path / 'panel')
+    candidate = 'reasoning_rl_clean_seed1_lr-x1_constant'
+    if problem == 'unfinished':
+        state = helper.read(panel['status'])
+        state['candidates'][candidate]['status'] = 'running'
+        write(panel['status'], state)
+    else:
+        adapter = panel['root'] / 'runs' / candidate / 'evaluated_checkpoints' / 'checkpoint-250' / 'adapter_model.safetensors'
+        adapter.unlink()  # Synthetic fixture only: emulate missing retained weights.
+    monkeypatch.setattr(helper, 'SDPAEditor', lambda *a, **kw: pytest.fail('No editor call in inspection'))
+    output = tmp_path / 'inspection.json'
+    with pytest.raises(ValueError, match='not completed|matching adapter is missing'):
+        helper.inspect_completed_candidate(panel['binding'], file_digest(panel['binding']),
+                                            panel['status'], candidate, output)
     assert not output.exists()
 
 class MeasuredFakeEditor(FakeEditor):

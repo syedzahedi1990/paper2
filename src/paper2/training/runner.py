@@ -324,6 +324,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     """
     synthetic = synthetic_model is not None
     execution_source = None
+    selected_settings_authorization = None
     config.validate(synthetic=synthetic)
     validate_rows(training_rows, config)
     budget = config.training_budget(len(training_rows), synthetic=synthetic)
@@ -338,6 +339,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             assert_profile_source(json.loads(Path(profile_report).read_text()), execution_source)
         from paper2.gates import assert_training_allowed
         review = assert_training_allowed(config.to_dict(), gate_file, profile_report)
+        selected_settings_authorization = review.get('validated_development_selection')
         from paper2.io import file_digest
         if corpus_manifest is None or file_digest(corpus_manifest) != review['calibration']['manifest_sha256']:
             raise ValueError('Training corpus manifest must match the frozen G0 manifest')
@@ -399,6 +401,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         previous = json.loads((output / 'run_manifest.json').read_text())
         if previous['config'] != config.to_dict() or previous['training_sha256'] != rows_digest(training_rows):
             raise ValueError('Resume config/data differ from the original run')
+        if (config.stage == 'confirmatory' and not synthetic
+                and previous.get('development_selection') != selected_settings_authorization):
+            raise ValueError('Resume development selection differs from the original confirmatory authorization')
         prior_ledger = json.loads((checkpoint / 'paper2_compute.json').read_text())
     resource_snapshots = (_ProfileResourceSnapshots(output / 'resource_steps.jsonl', resume_from_checkpoint,
                                                     synthetic=synthetic)
@@ -617,6 +622,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     manifest = {'config': config.to_dict(), 'stack': versions, 'torch': torch.__version__,
                 'source_identity': execution_source,
+                'development_selection': selected_settings_authorization,
                 'training_budget': budget, 'resource_plan': planned_resources,
                 'training_sha256': rows_digest(training_rows), 'training_examples': len(training_rows),
                 'trainable_parameters': trainable, 'model_revision_resolved': getattr(model.config, '_commit_hash', None),

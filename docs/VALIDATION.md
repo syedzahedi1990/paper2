@@ -1,3 +1,11 @@
+# Editor and selection correction — 30 October 2026
+
+The full pinned CPU-stack run passed **739 tests**. Two final persistence regressions were then added, and both affected modules passed **46 tests** on the final code. Together these cover the **741 tests** now collected; this is not a claim of a single final-source 741-test run. Ruff and `git diff --check` pass. [Validation evidence](validation/editor-selection-20261030.json) records final file hashes, versions, batch counts and this sequencing. Windows and the no-torch environment were not rerun locally.
+
+Coverage includes exact quoted spans and fenced JSON, historical v3 preservation, failure causes, UTF-8/LF I/O, deterministic training-oracle preparation, durable call ownership, computed twelve-attempt selection, retained failures, empty-trace winners, confirmatory rate/curve binding, and preselection completed-candidate inspection. The realistic CPU fixtures contain twelve distinct runs with complete scheduled predictions; they are not research measurements.
+
+The actual frozen 2,000-story training file and world file passed calibration preflight, selecting twelve oracle traces without model inference. All 17 corpus files verify unchanged. A read-only check of the live rental's original source/config/corpus/supervisor lineage passed. The first amended candidate is still running, so its full nine-checkpoint extraction remains pending. No real 7B editor calibration, G1 classification or G3 human audit is claimed. The running training checkout and artifacts were not changed. See the [dated addendum](amendments/2026-10-30-editor-and-selection.md).
+
 # Execution integrity correction — 30 October 2026
 
 **642 tests passed**, with zero failures or skips, on the pinned CPU stack with plotting installed. Ruff, `git diff --check` and 21 documented CLI parsing checks pass. [Exact tested-source evidence](validation/execution-integrity-20261030.json) records file hashes and package versions; source/test bytes stayed unchanged throughout the combined run. Windows and the no-torch environment were not rerun for this patch.

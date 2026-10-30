@@ -8,7 +8,7 @@ from .io import read_jsonl, write_jsonl, write_json, file_digest
 
 
 def _json(path):
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 def _backend(args):
@@ -50,6 +50,19 @@ def parser():
     matrix.add_argument("--output", required=True)
     matrix.add_argument("--development-panel", action="store_true", help="Export the declared pilot candidates without running them")
     matrix.add_argument("--design", choices=["amended_20261030", "legacy_proposal"], default="amended_20261030")
+    failure_policy = sub.add_parser("freeze-selection-failure-policy", help="Freeze failure treatment before observing a failed candidate")
+    for flag in ("output", "reviewer", "rationale"):
+        failure_policy.add_argument("--" + flag, required=True)
+    select = sub.add_parser("select-panel", help="Compute final-native family winners from all twelve terminal attempts")
+    for flag in ("execution-binding", "sha256", "panel-status", "failure-policy", "failure-policy-sha256", "output", "reviewer", "rationale"):
+        select.add_argument("--" + flag, required=True)
+    verify_selection = sub.add_parser("verify-panel-selection", help="Recompute a frozen selection against actual saved outcomes")
+    verify_selection.add_argument("--selection", required=True)
+    verify_selection.add_argument("--sha256", required=True)
+    selected_configs = sub.add_parser("selected-confirmatory-configs", help="Export configurations bound to computed family winners; never launch")
+    selected_configs.add_argument("--selection", required=True)
+    selected_configs.add_argument("--selection-sha256", required=True)
+    selected_configs.add_argument("--output", required=True)
     gates = sub.add_parser("init-gates")
     gates.add_argument("--output", required=True)
     g1 = sub.add_parser("verify-g1", help="Summarize complete all-arm learning evidence without approving the gate")
@@ -64,6 +77,9 @@ def parser():
     health.add_argument("--revision", help="Immutable tokenizer revision; required with --tokenizer")
     editability = sub.add_parser("g1-editability", help="Classify saved native checkpoint traces; never regenerate them")
     edit_sub = editability.add_subparsers(dest="editability_command", required=True)
+    inspect_candidate = edit_sub.add_parser("inspect-completed", help="Inspect one finished candidate before selection without launching the editor")
+    for flag in ("execution-binding", "sha256", "panel-status", "candidate", "output"):
+        inspect_candidate.add_argument("--" + flag, required=True)
     for name in ("prepare", "generate", "finalize", "resources"):
         task = edit_sub.add_parser(name)
         task.add_argument("--input", required=True, help="Preparation binding for prepare; prepared.json otherwise")
@@ -78,6 +94,20 @@ def parser():
         if name == "resources":
             task.add_argument("--journal")
             task.add_argument("--hourly-gbp", type=float)
+    calibration = sub.add_parser("editor-calibration", help="Prospective training-oracle editor diagnostic; no study outcomes")
+    cal_sub = calibration.add_subparsers(dest="calibration_command", required=True)
+    cal_prepare = cal_sub.add_parser("prepare")
+    for flag in ("training", "worlds", "corpus-manifest", "output"):
+        cal_prepare.add_argument("--" + flag, required=True)
+    for name in ("generate", "report"):
+        task = cal_sub.add_parser(name)
+        for flag in ("input", "sha256", "output"):
+            task.add_argument("--" + flag, required=True)
+        if name == "generate":
+            task.add_argument("--device", default="auto")
+            task.add_argument("--resume", action="store_true")
+        else:
+            task.add_argument("--batch", required=True)
     freeze = sub.add_parser("freeze-calibration")
     for flag in ("review", "manifest", "settings", "evidence", "reviewer", "rationale"):
         freeze.add_argument("--" + flag, required=True)
@@ -226,6 +256,36 @@ def main(argv=None):
             for config in configs:
                 name = f"{config.arm}_{config.dataset}_seed{config.seed}.json"
                 write_json(Path(args.output) / name, config.to_dict())
+    elif command == "freeze-selection-failure-policy":
+        from datetime import datetime, timezone
+        from .training.selection import selection_failure_policy
+        if not args.reviewer.strip() or not args.rationale.strip():
+            raise ValueError("Failure policy needs attribution and rationale")
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("x", encoding="utf-8", newline="\n") as stream:
+            json.dump({"schema_version": 1, "status": "frozen", "frozen_utc": datetime.now(timezone.utc).isoformat(),
+                       "reviewed_by": args.reviewer, "rationale": args.rationale,
+                       "policy": selection_failure_policy()}, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        print(json.dumps({"path": str(output.resolve()), "sha256": file_digest(output)}))
+    elif command == "select-panel":
+        from .training.selection_results import freeze_panel_selection
+        result = freeze_panel_selection(args.execution_binding, args.sha256, args.panel_status,
+                    args.failure_policy, args.failure_policy_sha256, args.output,
+                    reviewed_by=args.reviewer, rationale=args.rationale)
+        print(json.dumps({"path": str(Path(args.output).resolve()), "sha256": file_digest(args.output),
+                          "selected_settings": result['selected_settings'], "failures": result['failures']}))
+    elif command == "verify-panel-selection":
+        from .training.selection_results import verify_panel_selection
+        result = verify_panel_selection(args.selection, args.sha256)
+        print(json.dumps({"verified": True, "selected_settings": result['selected_settings'],
+                          "scientific_gate_decision": None}))
+    elif command == "selected-confirmatory-configs":
+        from .training.confirmatory_selection import export_selected_confirmatory_configs
+        result = export_selected_confirmatory_configs(args.selection, args.output,
+                                                       selection_sha256=args.selection_sha256)
+        print(json.dumps(result))
     elif command == "init-gates":
         from .gates import initial_review
         if Path(args.output).exists():
@@ -261,7 +321,10 @@ def main(argv=None):
                                tokenizer=tokenizer, tokenizer_provenance=provenance)
     elif command == "g1-editability":
         from .training import g1_editability
-        if args.editability_command == "prepare":
+        if args.editability_command == "inspect-completed":
+            print(json.dumps(g1_editability.inspect_completed_candidate(args.execution_binding, args.sha256,
+                                     args.panel_status, args.candidate, args.output)))
+        elif args.editability_command == "prepare":
             print(json.dumps(g1_editability.prepare(args.input, args.sha256, args.output)))
         elif args.editability_command == "generate":
             print(json.dumps(g1_editability.generate(args.input, args.sha256, args.output, device=args.device,
@@ -273,6 +336,16 @@ def main(argv=None):
                 raise FileExistsError("Resource report output must be a new file")
             write_json(args.output, g1_editability.resource_report(args.input, args.sha256,
                        journal_path=args.journal, hourly_gbp=args.hourly_gbp))
+    elif command == "editor-calibration":
+        from . import editor_calibration
+        if args.calibration_command == "prepare":
+            result = editor_calibration.prepare_files(args.training, args.worlds, args.corpus_manifest, args.output)
+        elif args.calibration_command == "generate":
+            result = editor_calibration.generate_file(args.input, args.sha256, args.output,
+                                                      device=args.device, resume=args.resume)
+        else:
+            result = editor_calibration.report_file(args.input, args.sha256, args.batch, args.output)
+        print(json.dumps(result))
     elif command in ("train", "profile"):
         from .training.config import load_config
         from .training.runner import run_training
