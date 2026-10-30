@@ -36,12 +36,23 @@ def _artifact_id(trace):
 
 
 def _validate_source_trace(trace):
-    if trace.get("schema_version") != 2:
-        raise ValueError("Regenerate source traces with schema v2 native-question timing")
+    if trace.get("schema_version") not in (2, 3):
+        raise ValueError("Regenerate source traces with native-question timing")
     if digest(trace["trace"]) != trace.get("trace_sha256"):
         raise ValueError("Frozen source trace text hash changed")
-    expected = digest([trace["source"], trace["source_checkpoint"], trace["basis_record_id"],
-                       _timing(trace["question_timing"]), trace["trace_sha256"]])
+    identity = [trace["source"], trace["source_checkpoint"], trace["basis_record_id"],
+                _timing(trace["question_timing"]), trace["trace_sha256"]]
+    if trace["schema_version"] == 3:
+        if trace.get("completion_protocol") != "natural_answer_cap_v2":
+            raise ValueError("Frozen natural trace completion protocol changed")
+        completion_hash = digest([trace["completion_text"], trace["completion_generated_ids"],
+                                  trace["generation_prompt_ids"], trace["native_outcome"]])
+        if completion_hash != trace.get("native_completion_sha256"):
+            raise ValueError("Frozen native completion hash changed")
+        identity.extend([trace["completion_protocol"], completion_hash])
+    elif trace.get("completion_protocol", "legacy_forced_answer_v1") != "legacy_forced_answer_v1":
+        raise ValueError("Legacy trace cannot claim the natural completion protocol")
+    expected = digest(identity)
     if trace.get("artifact_id") != expected or trace["trace_id"] != digest([expected, trace["record_id"]]):
         raise ValueError("Frozen source artifact identity changed")
 
@@ -65,10 +76,99 @@ def symbolic_belief_summary(row):
             "expected_answers": {view: answer_label(ordinary_target(world, view)) for view in VIEWS}}
 
 
-def generate_trace(backend, row, source, timing="question_dependent"):
+def _natural_trace(backend, row, source, timing):
+    """Save one uninterrupted sampled completion, including failures to answer.
+
+    Supplied-trace reader prompts are recorded separately. They never rescue
+    this native completion or supply its ordinary-answer observation.
+    """
+    from .training.data import natural_completion_outcome
+
+    protocol = "natural_answer_cap_v2"
+    prompt = render_prompt(backend.tokenizer, row, reasoning=True)
+    generated = backend.generate(prompt, max_new_tokens=384)
+    ids = generated["generated_ids"]
+    if len(ids) > 384:
+        raise ValueError("Native generation exceeded its sampled completion budget")
+    eos_token = backend.tokenizer.eos_token_id
+    if eos_token in ids and ids.index(eos_token) != len(ids) - 1:
+        raise ValueError("Native completion must be unpadded through its first EOS")
+    text = generated["text"]
+    if backend.tokenizer.decode(ids, skip_special_tokens=True) != text:
+        raise ValueError("Native completion text differs from its sampled tokens")
+    outcome = natural_completion_outcome(text, reasoning=True, completion_ids=ids,
+                                         eos_token_id=eos_token)
+    prediction = outcome["prediction"]
+    if prediction not in row["choices"]:
+        prediction = None
+    before, delimiter, _ = text.rpartition(ANSWER_DELIMITER)
+    if not delimiter and text.startswith("Answer:"):
+        before, delimiter = "", "Answer:"
+    # Only a complete terminal answer is separable from the observed trace.
+    # Incomplete/malformed headers remain evidence for health and fixed-editor
+    # classification; keep their replay boundary separate below.
+    trace = before if delimiter and outcome["answer_complete"] else text
+    # Locate actual sampled boundaries; re-encoding text can merge/split tokens.
+    decoded_prefixes = [backend.tokenizer.decode(ids[:i], skip_special_tokens=True)
+                        for i in range(len(ids) + 1)]
+    trace_end = next((i for i, value in enumerate(decoded_prefixes) if value == trace), None)
+    delimiter_end = next((i for i, value in enumerate(decoded_prefixes)
+                          if delimiter and value == before + delimiter), None)
+    raw_prefix = (generated["prompt_ids"] + ids[:delimiter_end]) if delimiter_end is not None else None
+    eos_seen = eos_token in ids
+    answer_ids = ids[delimiter_end:] if delimiter_end is not None else []
+    replay_eligible = bool(raw_prefix is not None and answer_ids and
+                           answer_ids[0] != eos_token)
+    answer_prompt = backend.tokenizer.decode(raw_prefix, skip_special_tokens=False) if raw_prefix else None
+    rerendered_prompt = render_prompt(backend.tokenizer, row, trace=trace)
+    rerendered_ids = backend.token_ids(rerendered_prompt)
+    ordinary_token = answer_ids[0] if replay_eligible else None
+    ordinary_prediction = None
+    if replay_eligible:
+        alphabet = answer_token_ids(backend.tokenizer, answer_prompt, row["choices"])
+        ordinary_prediction = next((label for label, token in alphabet.items() if token == ordinary_token), None)
+    checkpoint = _checkpoint(backend)
+    completion_hash = digest([text, ids, generated["prompt_ids"], outcome])
+    artifact = digest([source, checkpoint, row["id"], timing, digest(trace), protocol, completion_hash])
+    result = {"schema_version": 3, "artifact_id": artifact, "trace_id": digest([artifact, row["id"]]),
+              "source": source, "source_checkpoint": checkpoint, "basis_record_id": row["id"],
+              "record_id": row["id"], "world_id": row["world_id"], "view": row["view"],
+              "cue_condition": row.get("cue_condition"), "cue_location": row.get("cue_location"),
+              "question_timing": timing, "trace": trace, "trace_sha256": digest(trace),
+              "trace_tokens": trace_end, "trace_token_boundary_exact": trace_end is not None,
+              "truncated": not eos_seen, "cap_reached": len(ids) == 384, "eos_seen": eos_seen,
+              "completion_protocol": protocol, "completion_text": text, "completion_generated_ids": ids,
+              "completion_tokens": len(ids), "native_completion_sha256": completion_hash,
+              "native_outcome": outcome,
+              "native_prediction": prediction, "answer_complete": prediction is not None,
+              "answer_status": "complete" if prediction is not None else (
+                  "missing_delimiter" if not delimiter else "invalid_or_incomplete_answer"),
+              "generation_prompt": prompt, "generation_prompt_ids": generated["prompt_ids"],
+              "generated_trace_ids": ids[:trace_end] if trace_end is not None else None,
+              "forced_delimiter": False, "answer_prompt": answer_prompt,
+              "answer_prefix_ids": raw_prefix, "answer_generated_ids": answer_ids,
+              "rerendered_answer_prompt": rerendered_prompt, "rerendered_answer_prefix_ids": rerendered_ids,
+              "replay_token_ids_match": raw_prefix == rerendered_ids if replay_eligible else None,
+              "replay_eligible": replay_eligible,
+              "replay_ineligibility_reason": None if replay_eligible else (
+                  "missing_natural_delimiter" if not delimiter else
+                  "delimiter_not_at_sampled_token_boundary" if delimiter_end is None else
+                  "no_sampled_answer_token"),
+              "ordinary_answer_token": ordinary_token, "ordinary_prediction": ordinary_prediction}
+    if "world" in row:
+        result["belief_summary"] = symbolic_belief_summary(row)
+    return result
+
+
+def generate_trace(backend, row, source, timing="question_dependent", *,
+                   completion_protocol="legacy_forced_answer_v1"):
     timing = _timing(timing)
     if timing == "direct_fixed" and row["view"] != "direct":
         raise ValueError("A fixed trace must be generated from the native direct question")
+    if completion_protocol == "natural_answer_cap_v2":
+        return _natural_trace(backend, row, source, timing)
+    if completion_protocol != "legacy_forced_answer_v1":
+        raise ValueError("Unknown completion protocol")
     prompt = render_prompt(backend.tokenizer, row, reasoning=True)
     generated = backend.generate(prompt, max_new_tokens=384, stop=ANSWER_DELIMITER)
     text = generated["text"]
@@ -114,13 +214,14 @@ def generate_trace(backend, row, source, timing="question_dependent"):
     return result
 
 
-def collect_traces(backend, rows, source, timing="question_dependent"):
+def collect_traces(backend, rows, source, timing="question_dependent", *,
+                   completion_protocol="legacy_forced_answer_v1"):
     rows, timing = list(rows), _timing(timing)
     shared = {}
     direct = {_story_key(row): row for row in rows if row["view"] == "direct"}
     for row in rows:
         if timing == "question_dependent":
-            yield generate_trace(backend, row, source, timing)
+            yield generate_trace(backend, row, source, timing, completion_protocol=completion_protocol)
             continue
         key = _story_key(row)
         if key not in direct:
@@ -129,7 +230,7 @@ def collect_traces(backend, rows, source, timing="question_dependent"):
         if row.get("base_story", basis["story"]) != basis["story"]:
             raise ValueError("Fixed direct views changed the underlying rendered base story")
         if key not in shared:
-            shared[key] = generate_trace(backend, basis, source, timing)
+            shared[key] = generate_trace(backend, basis, source, timing, completion_protocol=completion_protocol)
             shared[key]["base_story_sha256"] = digest(basis["story"])
         trace = deepcopy(shared[key])
         trace.update(record_id=row["id"], view=row["view"], trace_id=digest([trace["artifact_id"], row["id"]]))
@@ -534,8 +635,24 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
             elif condition == "own_rerendered":
                 # Intentionally reconstruct through the ordinary reader formatter.
                 prefix_ids = backend.token_ids(prompt)
-            answer = backend.answer(prompt, row["choices"], prefix_ids=prefix_ids)
+            natural = trace.get("completion_protocol") == "natural_answer_cap_v2"
+            replay_evaluated = not (natural and condition == "own_replay" and not trace["replay_eligible"])
+            if replay_evaluated:
+                answer = backend.answer(prompt, row["choices"], prefix_ids=prefix_ids)
+            else:
+                from .backend import Answer
+                # There is no ordinary sampled answer to replay. Retain this
+                # outcome without asking a new question or appending a delimiter.
+                answer = Answer(None, -1, "", None, {})
             matched = (answer.token_id == trace["ordinary_answer_token"]) if replay and trace.get("replay_eligible") else None
+            protocol_metadata = ({"source_completion_protocol": trace["completion_protocol"],
+                                  "source_answer_complete": trace["answer_complete"],
+                                  "source_answer_status": trace["answer_status"],
+                                  "source_cap_reached": trace["cap_reached"],
+                                  "source_completion_tokens": trace["completion_tokens"],
+                                  "source_native_prediction": trace["native_prediction"],
+                                  "replay_evaluated": replay_evaluated if replay else None}
+                                 if natural else {})
             yield result_row(row, answer, reader, "trace_reader", source=trace["source"], condition=condition,
                              source_checkpoint=trace.get("source_checkpoint"), source_training_seed=trace.get("training_seed"),
                              question_timing=_timing(trace["question_timing"]), trace_id=trace["trace_id"],
@@ -580,4 +697,5 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                              rerendered_replay_matches=matched if condition == "own_rerendered" else None,
                              regeneration=regeneration, symbolic_summary=summary,
                              supplied_trace=text, trace_sha256=digest(text),
-                             trace_tokens=len(backend.token_ids(text)) if text is not None else 0)
+                             trace_tokens=len(backend.token_ids(text)) if text is not None else 0,
+                             **protocol_metadata)

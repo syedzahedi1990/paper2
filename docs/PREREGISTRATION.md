@@ -51,3 +51,7 @@ Each G0–G4 decision requires a named reviewer, rationale and immutable evidenc
 After these pilot reviews, confirmation reports the measurements and limitations without reapplying invented thresholds. Preserve complete panels, exact span/entity/length matching where specified, no leakage, frozen hashes, and cost authorization. Official OpenToM prompts and subtype macro-F1 with whole-story intervals are primary externally; adapted prompts are secondary. Zhong reports a different accuracy aggregation, so this is not a verified reproduction of its numerical scores. No null establishes absence of a stored belief, and no quadrant point identifies where a gain is stored.
 
 Protocol amendment v0.6.1 (before research training): broaden the rate panel from ×0.5/1/2 to ×1/3/10/30 and require every pilot arm’s G1 learning evidence. The selection objective, tie-breaking rule, exposure design and numerical-threshold-free review are unchanged.
+
+## Post-outcome pilot amendment, 30 October 2026
+
+The [dated completion/KL amendment](amendments/2026-10-30-natural-answer-and-kl.md) records pilot outcomes already seen, excludes the old panel from selection, and prospectively versions the natural-answer cap, punctuation scoring and KL setting. It adds descriptive trace-health and editor-assessed editability evidence without numerical pass marks. Fresh resource measurements and a new costed registry are required before the replacement panel. Historical scores remain under their original protocol; no confirmatory outcome was inspected.

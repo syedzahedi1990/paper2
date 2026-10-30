@@ -3,7 +3,34 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from .config import TrainingConfig
+from .config import LEGACY_COMPLETION_PROTOCOL, TrainingConfig
+from .generation import completion_token_budget
+
+
+PROFILE_ARRANGEMENT_KEYS = (
+    'model', 'revision', 'arm', 'model_amendment_sha256', 'group_size', 'trace_cap',
+    'lora_rank', 'lora_alpha', 'lora_modules', 'batch_size', 'gradient_accumulation_steps',
+    'max_prompt_length', 'load_in_4bit', 'attn_implementation', 'bf16', 'gradient_checkpointing',
+    'beta', 'completion_protocol',
+)
+
+
+def profile_arrangement_mismatches(profile_config: dict[str, Any],
+                                   config: TrainingConfig) -> list[str]:
+    """Compare measured execution arrangements, retaining only legacy defaults.
+
+    Historical profiles may predate explicit beta/protocol fields. Their absent
+    fields mean beta zero and the old forced-answer protocol, never the revised
+    protocol. Learning rates and optimization duration are deliberately not
+    execution-arrangement keys.
+    """
+    measured = {**profile_config}
+    measured.setdefault('beta', 0.0)
+    measured.setdefault('completion_protocol', LEGACY_COMPLETION_PROTOCOL)
+    target = config.to_dict()
+    if 'lora_modules' in measured:
+        measured['lora_modules'] = list(measured['lora_modules'])
+    return [key for key in PROFILE_ARRANGEMENT_KEYS if measured.get(key) != target[key]]
 
 
 def resource_plan(config: TrainingConfig, training_examples: int, development_examples: int,
@@ -13,11 +40,15 @@ def resource_plan(config: TrainingConfig, training_examples: int, development_ex
     native_evaluations = config.evaluation_schedule(steps) if development_examples else []
     immediate_evaluations = config.immediate_evaluation_schedule(steps) if development_examples else []
     evaluations = sorted(set(native_evaluations) | set(immediate_evaluations))
-    native_budget = config.trace_cap + delimiter_tokens + 4 if config.reasoning else 4
+    native_budget = completion_token_budget(
+        reasoning=config.reasoning, completion_protocol=config.completion_protocol,
+        trace_cap=config.trace_cap, delimiter_length=delimiter_tokens)
     native_generations = len(native_evaluations) * development_examples
     checkpoints = sorted({steps, *range(config.save_steps, steps + 1, config.save_steps)})
     return {
-        'schema_version': 2,
+        'schema_version': 3,
+        'completion_protocol': config.completion_protocol,
+        'beta': config.beta,
         'optimizer_steps': steps,
         'training_prompt_exposures': budget['planned_prompt_exposures'],
         'training_rollout_completions': budget['planned_prompt_exposures'] * config.group_size if config.rl else 0,
@@ -39,13 +70,27 @@ def resource_plan(config: TrainingConfig, training_examples: int, development_ex
 
 
 def full_pool_projection(config: TrainingConfig, training_examples: int, development_examples: int,
-                         delimiter_tokens: int, measured: dict[str, Any], *, synthetic: bool = False) -> dict[str, Any]:
+                         delimiter_tokens: int, measured: dict[str, Any], *, synthetic: bool = False,
+                         measured_config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Project an ordinary one-pool run from this arm/model's measured profile.
 
     A short profile is not a compute approval. In particular, early greedy trace
     lengths need not predict the learned model's lengths. Missing measured phases
     deliberately leave the total estimate unset.
     """
+    if measured_config is None:
+        if config.completion_protocol != LEGACY_COMPLETION_PROTOCOL or config.beta != 0.0:
+            raise ValueError('Revised protocol/beta resource projections require the actual measured_config')
+        measured_binding = {'completion_protocol': LEGACY_COMPLETION_PROTOCOL, 'beta': 0.0}
+        binding_scope = 'Legacy unbound ledger; only historical forced-answer protocol and beta zero.'
+    else:
+        mismatch = profile_arrangement_mismatches(measured_config, config)
+        if mismatch:
+            raise ValueError(f'Resource projection differs from measured arrangement: {mismatch}')
+        measured_binding = {key: measured_config.get(key) for key in PROFILE_ARRANGEMENT_KEYS}
+        measured_binding['completion_protocol'] = measured_config.get('completion_protocol', LEGACY_COMPLETION_PROTOCOL)
+        measured_binding['beta'] = measured_config.get('beta', 0.0)
+        binding_scope = 'Explicit configuration of the measured resource ledger.'
     target = replace(config, stage='pilot' if config.stage == 'profile' else config.stage,
                      profile=False, target_profile_bootstrap=False, max_steps=None, num_train_epochs=1.0,
                      eval_steps=250 if config.rl else 25, immediate_eval_steps=50 if config.rl else 25, save_steps=50)
@@ -78,6 +123,7 @@ def full_pool_projection(config: TrainingConfig, training_examples: int, develop
     return {
         'status': 'planning_estimate_requires_longer_gpu_profile_and_review',
         'same_arm_only': config.arm, 'same_model_only': config.model,
+        'measured_arrangement': measured_binding, 'measured_arrangement_scope': binding_scope,
         'target_config': target.to_dict(), 'plan': plan, 'measured_rates': rates,
         'projected_seconds': seconds,
         'projected_total_seconds': sum(seconds.values()) if all(v is not None for v in seconds.values()) else None,

@@ -146,3 +146,12 @@ def assert_profile_identity(config, profile, plan):
             raise ValueError('Target bootstrap must cite a profile of the calibrated pilot model and revision')
     elif any(measured.get(key) != config.get(key) for key in ('model', 'revision', 'arm', 'model_amendment_sha256')):
         raise ValueError('Training requires a profile of the same model, revision, arm and model amendment')
+    else:
+        from .config import TrainingConfig
+        from .resources import profile_arrangement_mismatches
+        # The runner checks the full execution arrangement. This identity gate
+        # additionally binds only the newly versioned reward/generation costs.
+        mismatch = [key for key in profile_arrangement_mismatches(measured, TrainingConfig(**config))
+                    if key in ('beta', 'completion_protocol')]
+        if mismatch:
+            raise ValueError(f'Training requires the measured execution arrangement, including beta and completion protocol: {mismatch}')

@@ -28,6 +28,76 @@ def verify_evidence(gate, root):
             raise ValueError(f"Gate evidence missing or modified: {item['path']}")
 
 
+def _g1_editor_measurements(gate, root, predictions):
+    """Read separate frozen-editor evidence without rewriting training health.
+
+    The bound JSON receipt contains editor_plan and generated_edits file bindings
+    and classifications mapping each native checkpoint record to one generated
+    artifact_id. Statuses are derived from validated machine outputs, never from
+    the mapping or a lexical heuristic. No human G3 approval is inferred here.
+    """
+    from .edit_generation import validate_generated_batch
+    from .training.data import parse_answer
+    from .training.config import NATURAL_COMPLETION_PROTOCOL
+    from .training.trace_health import summarize_trace_health
+    import re
+    item = gate.get('editability_evidence')
+    if item is None:
+        if gate.get('status') == 'pass':
+            raise ValueError('Revised G1 pass requires actual fixed-editor editability evidence; not_assessed is not a completed measurement')
+        return {'status': 'not_assessed', 'human_audit': 'not_evaluated_by_this_helper'}
+
+    def bound(binding, directory):
+        artifact = Path(directory) / binding.get('path', '')
+        if not artifact.is_file() or file_digest(artifact) != binding.get('sha256'):
+            raise ValueError('G1 fixed-editor evidence missing or modified')
+        return artifact, json.loads(artifact.read_text())
+
+    path, evidence = bound(item, root)
+    if not any((Path(root) / entry.get('path', '')).resolve() == path.resolve()
+               and entry.get('sha256') == item.get('sha256') for entry in gate.get('evidence', [])):
+        raise ValueError('G1 fixed-editor measurements must be included in reviewed evidence')
+    if evidence.get('schema_version') != 1 or evidence.get('completion_protocol') != NATURAL_COMPLETION_PROTOCOL:
+        raise ValueError('Unsupported G1 fixed-editor evidence protocol')
+    _, frozen_plan = bound(evidence.get('editor_plan', {}), path.parent)
+    _, generated = bound(evidence.get('generated_edits', {}), path.parent)
+    if generated.get('generation_plan') != frozen_plan:
+        raise ValueError('G1 editor outputs differ from the separately frozen editor plan')
+    contracts = validate_generated_batch(generated, allow_errors=True)
+    native = [row for row in predictions if row.get('format') == 'native_reasoning']
+    records = {(row['checkpoint_id'], row['id']): row for row in native}
+    classifications = evidence.get('classifications', [])
+    if (len(classifications) != len(records)
+            or {(row.get('checkpoint_id'), row.get('id')) for row in classifications} != set(records)):
+        raise ValueError('G1 editor classifications must cover every native checkpoint story exactly once')
+    statuses, used = [], set()
+    for classification in classifications:
+        raw = records[(classification['checkpoint_id'], classification['id'])]
+        if classification.get('adapter_sha256') != raw.get('adapter_sha256'):
+            raise ValueError('G1 editor classification adapter binding differs from its checkpoint')
+        artifact_id = classification.get('artifact_id')
+        contract = contracts.get(artifact_id)
+        if contract is None or artifact_id in used:
+            raise ValueError('G1 editor classification must bind one distinct generated artifact')
+        used.add(artifact_id)
+        text = raw['completion']
+        complete = parse_answer(text, True, completion_protocol=NATURAL_COMPLETION_PROTOCOL) is not None
+        suffix = re.search(r'(?:^|\n)Answer:\s*[A-F]\.?' r'\s*$', text) if complete else None
+        trace = text[:suffix.start()] if suffix is not None else text
+        if (contract.get('world_id') != raw['world_id'] or raw['id'] not in contract.get('record_ids', [])
+                or contract.get('source_checkpoint') != {'id': raw['checkpoint_id'], 'revision': raw['revision']}
+                or contract.get('generation', {}).get('input', {}).get('trace') not in (trace, trace.rstrip())):
+            raise ValueError('G1 editor output is not bound to the actual native checkpoint trace')
+        status = {'ready': 'editable', 'error': 'generation_failed'}.get(contract['generation_status'])
+        if contract['generation_status'] == 'not_editable':
+            status = contract['reason_code']
+        statuses.append({**raw, 'edit_status': status})
+    measured = summarize_trace_health(native, editor_statuses=statuses)
+    return {'status': 'measured', 'evidence': item, 'editor_plan': evidence['editor_plan'],
+            'generated_edits': evidence['generated_edits'], 'trace_health_with_editor_outcomes': measured,
+            'human_audit': 'not_evaluated_by_this_helper'}
+
+
 def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, calibration=None, seed=2026, samples=20_000):
     """Validate every pilot arm and report pointwise/paired story intervals.
 
@@ -54,6 +124,8 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
     common_worlds = None
     common_training_hash = None
     common_revision = None
+    common_completion_protocol = None
+    revised_native_predictions = []
     for entry in entries:
         arm = entry["arm"]
         if not isinstance(entry.get("interpretation"), str) or not entry["interpretation"].strip():
@@ -87,9 +159,15 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
                 or any(identity[key] != expected_model[key] for key in ('model', 'revision'))
                 or config.get('model_amendment_sha256') != plan['amendment_sha256']):
             raise ValueError(f"G1 {arm} must be a completed non-synthetic clean seed-1 pilot run matching the frozen model plan")
-        from .training.config import TrainingConfig
+        from .training.config import LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL, TrainingConfig
         run_config = TrainingConfig(**config)
         run_config.validate()
+        protocol = run_config.completion_protocol
+        if common_completion_protocol is not None and protocol != common_completion_protocol:
+            raise ValueError('G1 pilot arms must use one common completion protocol; legacy and revised runs cannot mix')
+        common_completion_protocol = protocol
+        if receipt.get('completion_protocol', LEGACY_COMPLETION_PROTOCOL) != protocol:
+            raise ValueError('G1 learning evidence completion protocol differs from its run')
         if common_revision is not None and identity["revision"] != common_revision:
             raise ValueError("G1 pilot arms used different base-model revisions")
         common_revision = identity["revision"]
@@ -133,6 +211,7 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
             common_worlds = worlds
             for row in [metric, *panel]:
                 if (any(row.get(key) != identity[key] for key in identity_keys if key != "stage")
+                        or row.get('completion_protocol', LEGACY_COMPLETION_PROTOCOL) != protocol
                         or row.get("split") != "development" or row.get("view") != "direct"
                         or row.get("evaluation_dataset") != "clean"
                         or row.get("checkpoint_id") != metric.get("checkpoint_id")
@@ -149,6 +228,37 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
                 or receipt.get("latest") != by_key[(final, native)]
                 or receipt.get("immediate_latest") != by_key[(final, "immediate")]):
             raise ValueError("G1 receipt boundaries disagree with the complete learning curves")
+        trace_health = None
+        trace_health_artifact = None
+        if protocol == NATURAL_COMPLETION_PROTOCOL:
+            from .training.trace_health import summarize_trace_health
+            item = receipt.get('artifacts', {}).get('trace_health', {})
+            artifact = path.parent / item.get('path', '')
+            if not artifact.is_file() or file_digest(artifact) != item.get('sha256'):
+                raise ValueError(f'G1 {arm} trace_health artifact missing or modified')
+            trace_health_artifact = item
+            trace_health = read_jsonl(artifact)
+            steps = {step for step, _ in expected}
+            if len(trace_health) != len(steps) or {row.get('step') for row in trace_health} != steps:
+                raise ValueError('G1 trace health requires every scheduled checkpoint, including explicit unassessed checkpoints')
+            for health in trace_health:
+                step = health['step']
+                checkpoint_metrics = [metric for metric in metrics if metric['step'] == step]
+                for metric in checkpoint_metrics:
+                    keys = (*[key for key in identity_keys if key != 'stage'], 'checkpoint_id',
+                            'adapter_sha256', 'completion_protocol', 'split', 'view', 'evaluation_dataset')
+                    if any(health.get(key) != metric.get(key) for key in keys):
+                        raise ValueError('G1 trace-health identity or checkpoint binding is inconsistent')
+                assessed = arm == 'reasoning_rl' and (step, 'native_reasoning') in expected
+                if type(health.get('native_reasoning_assessed')) is not bool or health['native_reasoning_assessed'] != assessed:
+                    raise ValueError('G1 trace-health native assessment flag differs from its scheduled panel')
+                observed = grouped[(step, 'native_reasoning')] if assessed else []
+                calculated = summarize_trace_health(observed, completion_protocol=protocol, cap=run_config.trace_cap)
+                if health.get('trace_health') != calculated:
+                    raise ValueError('G1 trace-health summary disagrees with raw native completions or explicit unassessed status')
+                if health.get('editability', {}).get('status') != 'not_assessed':
+                    raise ValueError('G1 training-health editability must remain not_assessed; bind later editor outcomes separately')
+            revised_native_predictions.extend(row for row in predictions if row['format'] == 'native_reasoning')
         curves = [{**metric, "accuracy_interval": cluster_interval(
                     {row["world_id"]: [int(row["correct"])]
                      for row in grouped[(metric["step"], metric["format"])]}, seed=seed, samples=samples)}
@@ -159,11 +269,15 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
             gains[fmt] = cluster_interval({row["world_id"]: [int(row["correct"]) - before[row["world_id"]]]
                                           for row in grouped[(final, fmt)]}, seed=seed, samples=samples)
         results[arm] = {"interpretation": entry["interpretation"], "curves": curves,
+                        'completion_protocol': protocol,
+                        'trace_health_artifact': trace_health_artifact, 'trace_health': trace_health,
                         "native_accuracy_gain": gains[native]["estimate"],
                         "immediate_accuracy_gain": gains["immediate"]["estimate"],
                         "native_gain_interval": gains[native], "immediate_gain_interval": gains["immediate"],
                         "bootstrap_samples": samples, "bootstrap_seed": seed,
                         "uncertainty": "95% pointwise whole-story bootstrap accuracy intervals and paired baseline-to-final gain intervals; fixed pilot seed 1, not training-seed uncertainty."}
+    if common_completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+        results['reasoning_rl']['editor_editability'] = _g1_editor_measurements(gate, root, revised_native_predictions)
     return results
 
 

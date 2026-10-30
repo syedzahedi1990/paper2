@@ -19,6 +19,9 @@ class ComputeLedger:
     forced_format_tokens: int = 0
     trace_cap_hits: int = 0
     truncated_completions: int = 0
+    natural_cap_reached: int = 0
+    natural_cap_failures: int = 0
+    natural_invalid_completions: int = 0
     generation_seconds: float = 0.0
     generation_and_scoring_seconds: float = 0.0
     update_seconds: float = 0.0
@@ -62,7 +65,10 @@ class ComputeLedger:
             'optimized_tokens': 'Non-masked loss-token presentations, counting repeated optimization separately.',
             'update_seconds': 'Forward/backward plus optimizer steps, excluding generation/scoring; includes trainer bookkeeping inside training_step.',
             'gpu_seconds': 'Elapsed occupied CUDA device time for one process/device; includes generation, updates, checkpointing and evaluation.',
-            'trace_cap_hits': 'Rollouts in which the 384-token cap required an injected answer delimiter.',
+            'trace_cap_hits': 'Legacy rollouts in which the cap required an injected answer delimiter; never redefined as v2 cap hits.',
+            'natural_cap_reached': 'V2 reasoning rollouts consuming the whole sampled completion budget, including valid boundary answers.',
+            'natural_cap_failures': 'V2 reasoning rollouts reaching the budget without a complete valid natural answer.',
+            'natural_invalid_completions': 'V2 reasoning rollouts with missing/invalid answers or out-of-budget raw tokens.',
             'evaluation_panels': 'Actual evaluation events, which may include immediate, native or both formats; includes repeats after resume.',
             'evaluation_native_panels': 'Complete native-format development passes, timed separately from immediate scoring.',
             'evaluation_immediate_panels': 'Complete immediate-answer development passes; each measured step retains an adapter.',

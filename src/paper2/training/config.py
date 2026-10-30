@@ -14,6 +14,9 @@ MODEL_REVISIONS = {
 MODEL_LAYERS = {'Qwen/Qwen2.5-3B-Instruct': 36, 'Qwen/Qwen2.5-7B-Instruct': 28,
                 'mistralai/Mistral-Small-24B-Instruct-2501': 40}
 LORA_MODULES = ('q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj')
+LEGACY_COMPLETION_PROTOCOL = 'legacy_forced_answer_v1'
+NATURAL_COMPLETION_PROTOCOL = 'natural_answer_cap_v2'
+COMPLETION_PROTOCOLS = (LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL)
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,8 @@ class TrainingConfig:
     lr_scheduler_type: str = 'constant_with_warmup'
     warmup_ratio: float = 0.05
     beta: float = 0.0
+    # Absent in historical configs: retain their original generation/scoring.
+    completion_protocol: str = LEGACY_COMPLETION_PROTOCOL
     temperature: float = 0.8
     top_p: float = 1.0
     logging_steps: int = 1
@@ -131,6 +136,10 @@ class TrainingConfig:
             raise ValueError('dataset must be clean or shortcut')
         if self.group_size != 8 or self.trace_cap != 384:
             raise ValueError('Proposal fixes GRPO group size 8 and trace cap 384')
+        if self.completion_protocol not in COMPLETION_PROTOCOLS:
+            raise ValueError('Unknown completion protocol')
+        if not math.isfinite(self.beta) or self.beta < 0:
+            raise ValueError('beta must be finite and nonnegative')
         if tuple(self.lora_modules) != LORA_MODULES:
             raise ValueError('Fixed LoRA targets must include q/k/v/o and gate/up/down projections')
         if (self.max_steps is not None and self.max_steps < 1) or self.batch_size < 1 or self.gradient_accumulation_steps < 1:

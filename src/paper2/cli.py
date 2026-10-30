@@ -73,6 +73,9 @@ def parser():
             run.add_argument("--reasoning", action="store_true", help="Native reasoning format; otherwise immediate")
         if command == "opentom-evaluate":
             run.add_argument("--opentom-protocol", choices=["official", "adapted"], default="official")
+        if command in ("evaluate", "traces"):
+            run.add_argument("--completion-protocol", choices=["legacy_forced_answer_v1", "natural_answer_cap_v2"],
+                             default="legacy_forced_answer_v1", help="Versioned native completion and scoring policy")
         if command == "evaluate":
             run.add_argument("--format", choices=["immediate", "native_answer", "native_reasoning"], default="immediate")
         if command in ("evaluate", "crossed"):
@@ -324,10 +327,10 @@ def main(argv=None):
             from .evaluation import evaluate_native
             results = evaluate_native(backend, rows,
                         reasoning=args.reasoning or args.format == "native_reasoning", reader=args.reader,
-                        native_answer=args.format == "native_answer")
+                        native_answer=args.format == "native_answer", completion_protocol=args.completion_protocol)
         elif command == "traces":
             from .traces import collect_traces
-            results = collect_traces(backend, rows, args.source, args.timing)
+            results = collect_traces(backend, rows, args.source, args.timing, completion_protocol=args.completion_protocol)
         elif command == "regenerate-traces":
             from .traces import regenerate_trace_artifacts
             results = regenerate_trace_artifacts(backend, rows,

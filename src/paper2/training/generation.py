@@ -1,9 +1,27 @@
-"""Stop a trace at the preregistered cap and insert only the answer delimiter.
+"""Explicit generation budgets, including the retained legacy delimiter rescue.
 
-The injected delimiter has no optimized loss tokens. The subsequent answer is
-sampled normally and receives only the ordinary correctness reward.
+Natural-answer v2 spends its whole reasoning-completion budget on sampled
+tokens. It uses no TraceCapProcessor and gets no extra delimiter/answer budget.
+The legacy processor below remains unchanged for interpreting prior runs.
 """
 from typing import Any
+from .config import COMPLETION_PROTOCOLS, LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL
+
+
+def completion_token_budget(*, reasoning: bool, completion_protocol: str = LEGACY_COMPLETION_PROTOCOL,
+                            trace_cap: int = 384, delimiter_length: int = 0) -> int:
+    """Return the generation limit, not a reward or a trace-quality criterion."""
+    if completion_protocol not in COMPLETION_PROTOCOLS:
+        raise ValueError('Unknown completion protocol')
+    if type(trace_cap) is not int or trace_cap < 1:
+        raise ValueError('Completion cap must be a positive integer')
+    if type(delimiter_length) is not int or delimiter_length < 0:
+        raise ValueError('Delimiter length must be a nonnegative integer')
+    if not reasoning:
+        return 4
+    if completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+        return trace_cap
+    return trace_cap + delimiter_length + 4
 
 
 class TraceCapProcessor:

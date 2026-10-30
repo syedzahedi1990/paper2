@@ -9,11 +9,11 @@ from pathlib import Path
 import time
 from typing import Any, Callable
 
-from .config import TrainingConfig
+from .config import TrainingConfig, LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL
 from .data import TRACE_INFORMATION, answer_reward, make_rl_rows, make_sft_rows, rows_digest, validate_rows
-from .generation import TraceCapProcessor
+from .generation import TraceCapProcessor, completion_token_budget
 from .ledger import ComputeLedger
-from .resources import full_pool_projection, resource_plan
+from .resources import full_pool_projection, resource_plan, profile_arrangement_mismatches
 
 PINNED = {'trl': '0.20.0', 'transformers': '4.53.2', 'peft': '0.16.0',
           'accelerate': '1.8.1', 'datasets': '3.6.0'}
@@ -108,7 +108,7 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
             original_generate = self.model.generate
 
             def timed_generate(*args, **kwargs):
-                if config.reasoning:
+                if config.reasoning and config.completion_protocol == LEGACY_COMPLETION_PROTOCOL:
                     cap = TraceCapProcessor(self.processing_class, config.trace_cap)
                     processors.append(cap)
                     existing = list(kwargs.pop('logits_processor', []))
@@ -142,6 +142,17 @@ def _make_trainers(config: TrainingConfig, ledger: ComputeLedger):
                 ledger.generated_tokens += int(result['completion_mask'].sum().item())
                 eos = result['completion_ids'].eq(self.processing_class.eos_token_id)
                 ledger.truncated_completions += int((~eos.any(dim=1)).sum().item())
+                if config.reasoning and config.completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+                    from .data import natural_completion_outcome
+                    for ids, mask in zip(result['completion_ids'], result['completion_mask']):
+                        raw_ids = ids[mask.bool()].tolist()
+                        outcome = natural_completion_outcome(
+                            self.processing_class.decode(raw_ids, skip_special_tokens=True),
+                            reasoning=True, completion_ids=raw_ids, trace_cap=config.trace_cap,
+                            eos_token_id=self.processing_class.eos_token_id)
+                        ledger.natural_cap_reached += int(outcome['cap_reached'])
+                        ledger.natural_cap_failures += int(outcome['cap_failure'])
+                        ledger.natural_invalid_completions += int(outcome['invalid_completion'])
             result['completion_attention_mask'] = result['completion_mask'].clone()
             for processor in processors:
                 before = result['completion_mask']
@@ -209,21 +220,32 @@ def _development_predictions(model: Any, tokenizer: Any, rows: list[dict[str, An
                 continue
             native_prompt = render_prompt(tokenizer, row, reasoning=config.reasoning)
             native_input = tokenizer(native_prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
-            cap = TraceCapProcessor(tokenizer, config.trace_cap) if config.reasoning else None
-            budget = config.trace_cap + len(cap.delimiter_ids) + 4 if cap else 4
+            cap = (TraceCapProcessor(tokenizer, config.trace_cap)
+                   if config.reasoning and config.completion_protocol == LEGACY_COMPLETION_PROTOCOL else None)
+            budget = completion_token_budget(reasoning=config.reasoning,
+                completion_protocol=config.completion_protocol, trace_cap=config.trace_cap,
+                delimiter_length=len(cap.delimiter_ids) if cap else 0)
             with torch.inference_mode():
                 generated = model.generate(**native_input, max_new_tokens=budget, do_sample=False,
                                            pad_token_id=tokenizer.pad_token_id, use_cache=True,
                                            logits_processor=LogitsProcessorList([cap]) if cap else LogitsProcessorList())
             completion = generated[0, native_input['input_ids'].shape[1]:].tolist()
             text = tokenizer.decode(completion, skip_special_tokens=True)
-            native_prediction = parse_answer(text, reasoning=config.reasoning)
+            native_prediction = parse_answer(text, reasoning=config.reasoning, completion_protocol=config.completion_protocol)
             native_correct = bool(answer_reward(completions=[text], answer=[row['answer']],
                                                 reasoning=config.reasoning, tokenizer=tokenizer,
-                                                trace_cap=config.trace_cap)[0])
-            records.append({**common, 'format': 'native_reasoning' if config.reasoning else 'native_answer',
+                                                trace_cap=config.trace_cap, completion_protocol=config.completion_protocol,
+                                                completion_ids=[completion])[0])
+            outcome = {}
+            if config.completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+                from .data import natural_completion_outcome
+                outcome = natural_completion_outcome(text, reasoning=config.reasoning,
+                    completion_ids=completion, trace_cap=config.trace_cap, eos_token_id=tokenizer.eos_token_id)
+            records.append({**common, **outcome, 'completion_protocol': config.completion_protocol,
+                            'format': 'native_reasoning' if config.reasoning else 'native_answer',
                             'prediction': native_prediction, 'correct': native_correct,
                             'completion': text, 'completion_ids': completion, 'completion_tokens': len(completion),
+                            'eos_token_id': tokenizer.eos_token_id,
                             'forced_delimiter': bool(cap and cap.capped_rows),
                             'truncated': tokenizer.eos_token_id not in completion})
     finally:
@@ -321,8 +343,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             profile = json.loads(Path(profile_report).read_text())
             if profile.get('synthetic') or profile.get('gpu_seconds', 0) <= 0:
                 raise ValueError('Production training requires a real GPU profiling report')
-            arrangement_keys = ('model', 'revision', 'arm', 'model_amendment_sha256', 'group_size', 'trace_cap', 'lora_rank', 'lora_alpha', 'lora_modules', 'batch_size', 'gradient_accumulation_steps', 'max_prompt_length', 'load_in_4bit', 'attn_implementation', 'bf16', 'gradient_checkpointing')
-            mismatch = [key for key in arrangement_keys if profile.get('config', {}).get(key) != config.to_dict()[key]]
+            mismatch = profile_arrangement_mismatches(profile.get('config', {}), config)
             if mismatch and not config.profile:
                 raise ValueError(f'Training differs from the profiled arrangement: {mismatch}; reprofile before continuing')
         relative = f'supervision/{config.dataset}_reasoning_sft.jsonl' if config.arm == 'reasoning_sft' else f'training/{config.dataset}.jsonl'
@@ -427,11 +448,14 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
             if len(tokenizer.encode(row['prompt'], add_special_tokens=False)) > config.max_prompt_length:
                 raise ValueError('Story prompt exceeds bound; silent left truncation is prohibited')
         args = GRPOConfig(**common, num_generations=config.group_size, max_prompt_length=None,
-                          max_completion_length=config.trace_cap + len(tokenizer.encode('\nAnswer:', add_special_tokens=False)) + 4 if config.reasoning else 4,
+                          max_completion_length=completion_token_budget(reasoning=config.reasoning,
+                              completion_protocol=config.completion_protocol, trace_cap=config.trace_cap,
+                              delimiter_length=delimiter_tokens),
                           temperature=config.temperature, top_p=config.top_p, beta=config.beta, num_iterations=1,
                           loss_type='grpo', scale_rewards=True, mask_truncated_completions=False,
                           use_vllm=False, generation_kwargs={'use_cache': True})
-        reward = partial(answer_reward, reasoning=config.reasoning, tokenizer=tokenizer, trace_cap=config.trace_cap)
+        reward = partial(answer_reward, reasoning=config.reasoning, tokenizer=tokenizer, trace_cap=config.trace_cap,
+                         completion_protocol=config.completion_protocol)
         reward.__name__ = 'direct_answer_correctness'
         trainer = GRPO(model=model, processing_class=tokenizer, args=args, train_dataset=Dataset.from_list(dataset_rows),
                        reward_funcs=reward, peft_config=lora)
@@ -460,6 +484,12 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
 
         def on_log(self, args, state, control, logs=None, **kwargs):
             record = {'step': state.global_step, **(logs or {})}
+            if config.completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+                record.update({'completion_protocol': config.completion_protocol,
+                    'train/sampled_completions_cumulative': ledger.sampled_completions,
+                    'train/natural_cap_reached_cumulative': ledger.natural_cap_reached,
+                    'train/natural_cap_failures_cumulative': ledger.natural_cap_failures,
+                    'train/natural_invalid_completions_cumulative': ledger.natural_invalid_completions})
             ledger.learning_curve.append(record)
             with (output / 'learning_curve.jsonl').open('a') as stream:
                 stream.write(json.dumps(record) + '\n')
@@ -510,7 +540,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                         'checkpoint_kind': 'base' if step == 0 else 'trained',
                         'adapter_sha256': adapter_digest, 'arm': config.arm, 'dataset': config.dataset,
                         'evaluation_dataset': 'clean', 'seed': config.seed, 'split': 'development',
-                        'view': 'direct', 'step': step, 'model': config.model, 'revision': config.revision}
+                        'view': 'direct', 'step': step, 'model': config.model, 'revision': config.revision,
+                        'completion_protocol': config.completion_protocol}
             predictions = [{**row, **identity} for row in predictions]
             metrics = []
             for format_name in ('immediate', 'native_reasoning' if config.reasoning else 'native_answer'):
@@ -524,6 +555,16 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                 'unique_worlds_seen': len(ledger.observed_world_ids)})
             _upsert_jsonl(output / 'checkpoint_evaluations.jsonl', metrics, ('checkpoint_id', 'format'))
             _upsert_jsonl(output / 'checkpoint_predictions.jsonl', predictions, ('checkpoint_id', 'format', 'id'))
+            if config.completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+                from .trace_health import summarize_trace_health
+                native_reasoning = [row for row in predictions if row['format'] == 'native_reasoning']
+                health = summarize_trace_health(native_reasoning, completion_protocol=config.completion_protocol,
+                                                cap=config.trace_cap)
+                health_record = {**identity, 'native_reasoning_assessed': bool(native_reasoning),
+                                 'trace_health': health,
+                                 'editability': {'status': 'not_assessed',
+                                     'reason': 'Requires the frozen editor classification; no lexical proxy is substituted.'}}
+                _upsert_jsonl(output / 'checkpoint_trace_health.jsonl', [health_record], ('checkpoint_id',))
             by_format = {metric['format']: metric for metric in metrics}
             native_format = 'native_reasoning' if config.reasoning else 'native_answer'
             logs = {'dev/n': len(dev_rows), 'dev/checkpoint_id': checkpoint_id,
@@ -546,6 +587,10 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                                'checkpoint_evaluations': str((output / 'checkpoint_evaluations.jsonl').resolve()),
                                'checkpoint_predictions': str((output / 'checkpoint_predictions.jsonl').resolve()),
                                'note': 'Judge G1 in the rewarded native format; immediate-answer transfer is a separate outcome.'}
+                if config.completion_protocol == NATURAL_COMPLETION_PROTOCOL:
+                    g1_evidence['completion_protocol'] = config.completion_protocol
+                    g1_evidence['checkpoint_trace_health'] = str((output / 'checkpoint_trace_health.jsonl').resolve())
+                    g1_evidence['editability_status'] = 'not_assessed_until_frozen_editor_review'
                 (output / 'g1_learning_evidence.json').write_text(json.dumps(g1_evidence, indent=2) + '\n')
                 logs.update({'dev/direct_native_accuracy': latest['accuracy'], 'dev/native_format': native_format})
             self.on_log(None, type('State', (), {'global_step': step})(), None, logs=logs)
@@ -571,7 +616,9 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                 'trainable_parameters': trainable, 'model_revision_resolved': getattr(model.config, '_commit_hash', None),
                 'trace_supervision': TRACE_INFORMATION.get(config.trace_source) if config.arm == 'reasoning_sft' else None,
                 'generation_arrangement': 'single process/device; transformers generate; no vLLM; standard KV cache',
-                'supervision_mask': 'Completion tokens only; prompt and padding masked; injected cap delimiter masked for RL.',
+                'supervision_mask': ('Completion tokens only, including failed completions; prompt and padding masked; no injected delimiter.'
+                                     if config.completion_protocol == NATURAL_COMPLETION_PROTOCOL else
+                                     'Completion tokens only; prompt and padding masked; injected cap delimiter masked for RL.'),
                 'synthetic_integration_test': synthetic, 'resume_from_checkpoint': resume_from_checkpoint,
                 'training_device': str(training_device),
                 'corpus_manifest': str(corpus_manifest) if corpus_manifest else None,
@@ -621,7 +668,8 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
                    'training_device': str(training_device),
                    'synthetic': synthetic, **report,
                    'full_pool_resource_projection': full_pool_projection(config, len(training_rows), len(dev_rows or []),
-                                                                         delimiter_tokens, report, synthetic=synthetic),
+                                                                         delimiter_tokens, report, synthetic=synthetic,
+                                                                         measured_config=config.to_dict()),
                    'read_before_training': 'Review full-pool training, native development evaluation and retained snapshot storage for every arm; a short profile does not establish the pilot budget.'}
         (output / 'profile_report.json').write_text(json.dumps(profile, indent=2) + '\n')
     return {'manifest': manifest, 'compute': report, 'output_dir': str(output)}
@@ -651,5 +699,10 @@ def finalize_g1_learning_evidence(output_dir):
                           ('predictions', 'checkpoint_predictions.jsonl'))},
         'note': 'Review each pilot arm in both its native format and immediate-answer format, including baseline and final; flat or negative gains are measurements, not automatic failures.',
     })
+    if config.get('completion_protocol') == NATURAL_COMPLETION_PROTOCOL:
+        evidence['completion_protocol'] = config['completion_protocol']
+        health_path = output / 'checkpoint_trace_health.jsonl'
+        evidence['artifacts']['trace_health'] = {'path': health_path.name, 'sha256': file_digest(health_path)}
+        evidence['note'] += ' Trace cap, repetition and editor-assessed editability are descriptive evidence, not numerical pass marks.'
     write_json(path, evidence)
     return evidence

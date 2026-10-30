@@ -1,0 +1,43 @@
+# Post-outcome completion and KL amendment — 30 October 2026
+
+This amendment follows observed pilot training outcomes and the user's explicit instruction to change the setup. It is not prospective with respect to those outcomes. Codex records the operational implementation; this is not a human G3 audit or a scientific gate approval. The old panel is superseded and no setting will be selected from it. Preserve all old configurations, scores, traces, checkpoints and failed/interrupted attempts under their original protocol.
+
+## Evidence already seen
+
+The completed clean seed-1 reasoning-RL candidate used the lowest panel rate, 2e-5, zero KL and the original forced-answer completion protocol. At step 2000 it answered 119/120 development direct questions correctly in both immediate and native formats. All 120 final native traces repeated “know” to the cap, followed by an inserted answer delimiter. Saved native panels first show this pattern at step 1500; it was absent at step 1250. Across training, 5,880 of 16,000 rollouts used the cap rescue. TRL 0.20's `completions/clipped_ratio` instead counts missing EOS; it registered only one such rollout. Those quantities must not be conflated.
+
+The second candidate, rate 6e-5, had 92/120 native and 98/120 immediate correct at step 250. Its 120 native completions contained 49 distinct, short trace prefixes and no forced delimiter or repeated-know-only trace. Immediate accuracy at step 300 was 81/120. Its captured training prefix through step 314 remained short. It was interrupted on the user's instruction at 09:14 UTC rather than allowed to complete the obsolete panel. Its later behavior is unknown.
+
+These observations establish that the old setup permitted accurate answers alongside collapsed written traces. They do not isolate the causal contributions of the rescue, punctuation rule, KL coefficient or learning rate. Correct immediate answers also do not establish a specific internal belief-tracking mechanism. The old result is a setup-specific pilot observation, not a confirmatory claim about reasoning RL.
+
+The diagnostic receipt `runs/vast-20261029/operator/post-outcome-diagnostic-20261030T0902/mechanism-analysis.json` has SHA-256 `2704c7e8cdf0cb4f9d0ae3821efed8b8cf8ad7d2c3adc82ab0b61e1acbe070f0`. It binds raw observations and the inspected frozen code. It remains private operational evidence; the public repository need not contain model weights or all run files.
+
+## Revised completion protocol
+
+New runs explicitly use `natural_answer_cap_v2`. The legacy default `legacy_forced_answer_v1` remains available to reproduce old runs; historical scores are not rewritten.
+
+For reasoning-format generation, **384 is the maximum number of sampled completion tokens, including the natural answer delimiter and answer**. This is an explicit refinement of the former prose-only cap plus forced suffix. A complete `Answer: X` must be present within that budget. A valid complete answer on token 384 counts even without a following EOS. An absent, incomplete, malformed or out-of-budget answer earns zero; reaching the cap never causes insertion of an answer delimiter, another answer-generation call or a newly rendered answer prompt. Ordinary generation may end earlier at EOS. Nothing separately rewards trace length, wording, explanation quality or non-repetition.
+
+Accept one optional adjacent terminal period after the answer letter, with surrounding trailing whitespace permitted. Trailing explanatory prose or multiple terminal periods remain invalid; earlier reasoning text retains the original parser semantics. A reasoning completion may begin with `Answer: X`; there is no minimum amount of prose. Answer-only native generation keeps its four-token limit and accepts the same optional period. Immediate full-vocabulary next-token evaluation and the official OpenToM parser remain unchanged.
+
+Training rewards are assigned from the actual generated token sequence before GRPO advantages are computed, not from a decode/re-encode estimate. Failed completion tokens remain in the loss; the revised protocol injects no formatting tokens to mask. Use this protocol consistently for reasoning RL, answer RL and label-SFT native evaluation, including all new untrained step-zero measurements. Supplied-trace interventions remain explicit interventions and are not ordinary generation rescue.
+
+Set KL beta to **0.04 for both RL arms**, against the pinned untrained base with the adapter disabled. SFT has no KL objective. This is a chosen amended setting, not a learned optimum or a value established by Zhong et al. All three pilot arms restart independently from the same pinned Mistral 24B base. No old candidate or profiling adapter initializes them.
+
+## G1 evidence and editability
+
+At every scheduled native reasoning checkpoint, retain raw tokens and report cap-budget exhaustion, cap failure, answer validity, exact trace duplication and token repetition. Reports give counts, denominators, estimates and 95% intervals from 20,000 whole-story bootstrap resamples; average seeds within story when combining runs. Repetition is descriptive, not a numerical pass criterion. Cheap immediate-only checkpoints have no new trace-health measurement and must be explicitly marked unassessed.
+
+Actual editability is the frozen editor's trace-specific classification, not a lexical heuristic or an accuracy surrogate. Preserve every native checkpoint's direct-question traces for that assessment. Use the previously declared editor model/revision and a preregistered prompt and record manifest, fixed before generating its classifications; report editable, belief-not-stated, contradicted/unresolved and unassessed denominators honestly. Assess the belief stated in the trace even if wrong. Editor classifications are measurements needing validation, not human review. Until the classification job completes, the learning evidence explicitly says editability is not assessed. G3 still requires the named human's random sample audit; prepare the actual sample before requesting it. No G1 approval may quietly treat missing editability as a favorable result.
+
+The answer cue and queried-belief summary remain Test 2's positive controls, and the residual swap over the same layers remains Test 3's positive control. Near-zero editability is retained as an outcome and interpreted with the setup and editor evidence. It neither automatically rejects an arm nor proves that it has no internal belief representation.
+
+## Resources, rerun and selection
+
+Reprofile all three amended pilot arms on the existing rental before candidate learning: five fresh updates at the inherited reference rates, full 120-story immediate/native panels at zero and final, actual save/storage measurements. The initial profiling batch has a two-hour elapsed limit. If timing stability requires the previously declared 25-update extension, record that resource-only decision before another fresh-base batch; never choose it on accuracy. Positive KL adds reference scoring, so old beta-zero profiles cannot authorize the new arrangement. Bind beta, completion protocol, model/revision, actual source/runtime and frozen corpus in the profile compatibility checks.
+
+The intended rerun retains all three arms and the four rate multipliers ×1/3/10/30, constant schedule/no warmup, clean seed 1. Freeze a new registry and costed execution decision before any candidate learning. Keep the existing family selection rule only within that complete amended panel: final native development accuracy, mean of the two RL arms for a shared RL setting, label SFT for the SFT setting, then smaller-rate/no-warmup ties. G1 reviews trace health and editability descriptively before further scientific work. Do not retrospectively select the old high-accuracy collapsed candidate or introduce a trace-health pass mark.
+
+All sunk costs count toward the same £500 ceiling, with retained-storage and network/FX reserves. The original lease deadline, actual remaining account credit and disk space constrain execution; do not reset a clock, assume top-up, buy storage or rent a second machine. Review actual revised measurements before promising panel or confirmatory affordability. All matching snapshots and final adapters remain preserved. The confirmatory grid still requires later measured gates and cost approval.
+
+The pinned model, corpus, question/control panels, LoRA modules/rank, GRPO groups of eight, story exposure, seed plan, bootstrap convention, matching rule, intervention band and 14 December review remain as previously amended. No confirmation outcome informed this decision.
