@@ -24,7 +24,8 @@ def evaluate_native(backend, rows, reasoning=False, reader=None, native_answer=F
     if completion_protocol not in ("legacy_forced_answer_v1", "natural_answer_cap_v2"):
         raise ValueError("Unknown completion protocol")
     if not reasoning and not native_answer:
-        yield from evaluate_immediate(backend, rows, reader)
+        for result in evaluate_immediate(backend, rows, reader):
+            yield {**result, 'completion_protocol': completion_protocol}
         return
     from .backend import Answer
     from .training.data import parse_answer
@@ -40,6 +41,9 @@ def evaluate_native(backend, rows, reasoning=False, reader=None, native_answer=F
                             trace["completion_text"], None, {})
             yield result_row(row, answer, reader or backend.checkpoint_id, "native_reasoning",
                              trace=trace["trace"], trace_tokens=trace["trace_tokens"],
+                             trace_token_attribution=trace["trace_token_attribution"],
+                             trace_characters=trace["trace_characters"],
+                             trace_whitespace_words=trace["trace_whitespace_words"],
                              answer_generated_ids=ids, answer_tokens=len(ids),
                              completion_protocol=completion_protocol,
                              completion_text=trace["completion_text"],

@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from paper2.data import VIEWS
-from paper2.gates import (_validate_frozen_g4_band, assert_training_allowed,
+from paper2.gates import (_validate_frozen_g4_band, inspect_historical_training_evidence,
                           freeze_calibration, validate_calibration_manifest)
 from paper2.io import digest, file_digest, write_json, write_jsonl
 from paper2.training.config import MODEL_LAYERS, MODEL_REVISIONS, TrainingConfig, experiment_matrix
@@ -76,7 +76,7 @@ def rebind_amendment(calibration, root, amendment):
     calibration['settings']['model_plan']['amendment'] = bound(path)
 
 
-def test_defaults_and_shipped_matrices_remain_three_b_pilot_seven_b_confirmation():
+def test_legacy_factory_retains_three_b_pilot_seven_b_confirmation():
     plan = calibrated_model_plan({}, '.')
     assert plan['amendment_sha256'] is None
     for stage in ('pilot', 'confirmatory'):
@@ -113,17 +113,19 @@ def test_amended_pilot_freezes_and_profiles_without_confirmatory_gate_circularit
     config = TrainingConfig(stage='profile', model=plan['pilot']['model'], max_steps=5,
                             model_amendment_sha256=plan['amendment_sha256'])
     config.validate()
-    result = assert_training_allowed(config.to_dict(), gate, None)
+    inspection = inspect_historical_training_evidence(config.to_dict(), gate, None)
+    assert inspection['eligible_for_current_launch'] is False
+    result = inspection['historical_review']
     assert result['gates']['G1']['status'] == 'pending'
     assert result['paid_compute']['approved'] is False
     # Calling the same model confirmatory cannot reuse this pilot authorization.
     with pytest.raises(ValueError, match='profiling report'):
-        assert_training_allowed(replace(config, stage='confirmatory').to_dict(), gate, None)
+        inspect_historical_training_evidence(replace(config, stage='confirmatory').to_dict(), gate, None)
     validate_calibration_manifest(review['calibration'], root=root)
     review['gates']['G0']['evidence'].pop()  # An unreviewed substitution is not a frozen amendment.
     write_json(gate, review)
     with pytest.raises(ValueError, match='included in reviewed G0 evidence'):
-        assert_training_allowed(config.to_dict(), gate, None)
+        inspect_historical_training_evidence(config.to_dict(), gate, None)
 
 
 def test_model_amendment_and_capability_artifact_tampering_are_rejected(amended):

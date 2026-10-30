@@ -202,6 +202,7 @@ def test_component_cli_exposes_secondary_donor_and_preserves_joint_mask(tmp_path
     source.write_text(json.dumps(pair) + '\n')
     output = tmp_path / 'components.jsonl'
     assert cli.main(['components', '--model', 'tiny-recipient', '--donor-model', 'tiny-donor',
+                     '--completion-protocol', 'natural_answer_cap_v2',
                      '--input', str(source), '--output', str(output), '--layers', '0', '1', '--layer-mode', 'joint']) == 0
     assert requests == [('tiny-donor', None)]
     rows = [json.loads(line) for line in output.read_text().splitlines()]
@@ -229,7 +230,8 @@ def test_cli_default_runs_primary_all_after_layer_zero_and_descriptive_layers(tm
     monkeypatch.setattr(cli, "_backend", lambda args: backend)
     source, output = tmp_path / "pairs.jsonl", tmp_path / "components.jsonl"
     source.write_text(json.dumps(pair) + "\n")
-    assert cli.main(["components", "--input", str(source), "--output", str(output)]) == 0
+    assert cli.main(["components", "--input", str(source), "--output", str(output),
+                     "--completion-protocol", "natural_answer_cap_v2"]) == 0
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert {tuple(row["layers"]) for row in rows if row["receipt"]} == {(1,), (2,), (1, 2)}
     primary = [row for row in rows if row["layers"] == [1, 2] and row["receipt"]]

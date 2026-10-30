@@ -83,6 +83,7 @@ def _natural_trace(backend, row, source, timing):
     this native completion or supply its ordinary-answer observation.
     """
     from .training.data import natural_completion_outcome
+    from .training.trace_health import trace_token_attribution
 
     protocol = "natural_answer_cap_v2"
     prompt = render_prompt(backend.tokenizer, row, reasoning=True)
@@ -112,6 +113,7 @@ def _natural_trace(backend, row, source, timing):
     decoded_prefixes = [backend.tokenizer.decode(ids[:i], skip_special_tokens=True)
                         for i in range(len(ids) + 1)]
     trace_end = next((i for i, value in enumerate(decoded_prefixes) if value == trace), None)
+    trace_lengths = trace_token_attribution(trace, text, ids, tokenizer=backend.tokenizer)
     delimiter_end = next((i for i, value in enumerate(decoded_prefixes)
                           if delimiter and value == before + delimiter), None)
     raw_prefix = (generated["prompt_ids"] + ids[:delimiter_end]) if delimiter_end is not None else None
@@ -136,6 +138,8 @@ def _natural_trace(backend, row, source, timing):
               "cue_condition": row.get("cue_condition"), "cue_location": row.get("cue_location"),
               "question_timing": timing, "trace": trace, "trace_sha256": digest(trace),
               "trace_tokens": trace_end, "trace_token_boundary_exact": trace_end is not None,
+              "trace_token_attribution": trace_lengths,
+              "trace_characters": len(trace), "trace_whitespace_words": len(trace.split()),
               "truncated": not eos_seen, "cap_reached": len(ids) == 384, "eos_seen": eos_seen,
               "completion_protocol": protocol, "completion_text": text, "completion_generated_ids": ids,
               "completion_tokens": len(ids), "native_completion_sha256": completion_hash,
@@ -482,6 +486,9 @@ def regenerate_trace_artifacts(backend, rows, traces, source, edits, *, seed=202
     The resulting JSONL is the input for both crossed readers. A reader-side
     continuation, even with the same random seed, is a different intervention.
     """
+    traces = list(traces)
+    if any(trace.get("purpose") == "g1_editability_only" for trace in traces):
+        raise ValueError("G1 editability-only sources lack replay provenance and cannot enter Test 2 regeneration")
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
     batch_review = _batch_review(edits, edit_audit)
@@ -558,6 +565,9 @@ def run_crossed_reader(backend, rows, traces, reader, edits=None,
                        conditions=("original", "own_replay", "own_rerendered", "answer_cue", "none"), *,
                        regenerated=None, edit_audit=None):
     """Read identical saved source text in every cell; never generate here."""
+    traces = list(traces)
+    if any(trace.get("purpose") == "g1_editability_only" for trace in traces):
+        raise ValueError("G1 editability-only sources lack replay provenance and cannot enter Test 2 readers")
     records = {row["id"]: row for row in rows}
     contracts, selection = _contracts(edits)
     batch_review = _batch_review(edits, edit_audit, required=bool(set(conditions) & EDIT_CONTROLS))

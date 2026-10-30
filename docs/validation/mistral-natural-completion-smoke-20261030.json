@@ -1,0 +1,100 @@
+{
+  "kind": "real_cached_mistral_tokenizer_cpu_smoke",
+  "model": "mistralai/Mistral-Small-24B-Instruct-2501",
+  "model_weights_loaded": false,
+  "observed_utc": "2026-10-30T12:30:04.375627+00:00",
+  "results": [
+    {
+      "case": "know_loop",
+      "outcome": {
+        "answer_complete": false,
+        "cap_failure": true,
+        "cap_reached": true,
+        "eos_seen": false,
+        "invalid_completion": true,
+        "parsed_answer": null,
+        "prediction": null,
+        "sampled_tokens": 384,
+        "termination_reason": "cap_failure",
+        "token_budget": 384,
+        "within_token_budget": true
+      },
+      "reward": 0.0,
+      "tokens": 384
+    },
+    {
+      "case": "Answer: A.",
+      "outcome": {
+        "answer_complete": true,
+        "cap_failure": false,
+        "cap_reached": false,
+        "eos_seen": false,
+        "invalid_completion": false,
+        "parsed_answer": "A",
+        "prediction": "A",
+        "sampled_tokens": 4,
+        "termination_reason": "complete_without_eos",
+        "token_budget": 384,
+        "within_token_budget": true
+      },
+      "reward": 1.0,
+      "tokens": 4
+    },
+    {
+      "case": "Alice believes box.\nAnswer: A.",
+      "outcome": {
+        "answer_complete": true,
+        "cap_failure": false,
+        "cap_reached": false,
+        "eos_seen": false,
+        "invalid_completion": false,
+        "parsed_answer": "A",
+        "prediction": "A",
+        "sampled_tokens": 8,
+        "termination_reason": "complete_without_eos",
+        "token_budget": 384,
+        "within_token_budget": true
+      },
+      "reward": 1.0,
+      "tokens": 8
+    },
+    {
+      "case": "Answer: A..",
+      "outcome": {
+        "answer_complete": false,
+        "cap_failure": false,
+        "cap_reached": false,
+        "eos_seen": false,
+        "invalid_completion": true,
+        "parsed_answer": null,
+        "prediction": null,
+        "sampled_tokens": 4,
+        "termination_reason": "invalid_completion",
+        "token_budget": 384,
+        "within_token_budget": true
+      },
+      "reward": 0.0,
+      "tokens": 4
+    },
+    {
+      "case": "Answer: A. More text",
+      "outcome": {
+        "answer_complete": false,
+        "cap_failure": false,
+        "cap_reached": false,
+        "eos_seen": false,
+        "invalid_completion": true,
+        "parsed_answer": null,
+        "prediction": null,
+        "sampled_tokens": 6,
+        "termination_reason": "invalid_completion",
+        "token_budget": 384,
+        "within_token_budget": true
+      },
+      "reward": 0.0,
+      "tokens": 6
+    }
+  ],
+  "revision": "9527884be6e5616bdd54de542f9ae13384489724",
+  "source_generation": false
+}

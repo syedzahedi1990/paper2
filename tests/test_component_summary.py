@@ -5,6 +5,8 @@ import pytest
 
 from paper2.data import VIEWS
 from paper2.interventions import component_summary
+from paper2.interventions.scoring import compare_checkpoints
+from paper2.training.config import LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL
 
 
 def panels():
@@ -33,6 +35,31 @@ def panels():
     before = [row for world in ('p', 'q') for row in one(world)]
     after = [row for seed in (1, 2) for world in ('p', 'q') for row in one(world, seed, True)]
     return before, after
+
+
+@pytest.mark.parametrize('analyze', [compare_checkpoints, component_summary])
+@pytest.mark.parametrize('legacy_explicit', [False, True])
+def test_direct_component_apis_reject_mixed_protocols_before_pairing(analyze, legacy_explicit):
+    before, after = panels()
+    if legacy_explicit:
+        before = [{**row, 'completion_protocol': LEGACY_COMPLETION_PROTOCOL} for row in before]
+    after = [{**row, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL} for row in after]
+    with pytest.raises(ValueError, match='Mixed completion protocols'):
+        analyze(before, after)
+
+
+@pytest.mark.parametrize('protocol', [LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL])
+def test_component_summary_preserves_protocol_and_original_effects(protocol):
+    before, after = panels()
+    historical = component_summary(before, after)
+    marked = [[{**row, 'completion_protocol': protocol} for row in rows] for rows in (before, after)]
+    result = component_summary(iter(marked[0]), iter(marked[1]))
+    assert result['completion_protocol'] == protocol
+    assert result['historical_records_without_protocol'] == 0
+    assert result['protocol_records'] == len(before) + len(after)
+    assert all(row['completion_protocol'] == protocol for row in result['paired_effects'])
+    assert result['probability_effects'] == historical['probability_effects']
+    assert result['consequence_patterns'] == historical['consequence_patterns']
 
 
 def test_component_summary_keeps_changes_preservation_and_joint_separate():

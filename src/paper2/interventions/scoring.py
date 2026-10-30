@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 from paper2.data import VIEWS
+from paper2.protocols import completion_protocol
 
 
 def score_consequence_pattern(predictions: Mapping[str, str | None],
@@ -42,6 +43,8 @@ def _mask(row):
 def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Pair identical within-checkpoint swaps, retaining view and required-change status."""
     from paper2.analysis import _seed
+    before, after = list(before), list(after)
+    protocol = completion_protocol(before + after)
     seeds = {_seed(r) for r in after}
     if {_seed(r) for r in before} == {None} and seeds and None not in seeds:
         before = [{**r, "training_seed": seed} for seed in seeds for r in before]
@@ -73,7 +76,8 @@ def compare_checkpoints(before: Sequence[Mapping[str, Any]], after: Sequence[Map
                 raise ValueError("Checkpoint comparisons changed forecast targets")
         old = row["forecast_probability"] - left[own_key]["forecast_probability"]
         new = right[key]["forecast_probability"] - right[own_key]["forecast_probability"]
-        result.append({"training_seed": key[0], "pair_id": key[1], "view": key[2], "mask_id": key[3],
+        result.append({"completion_protocol": protocol["completion_protocol"],
+                       "training_seed": key[0], "pair_id": key[1], "view": key[2], "mask_id": key[3],
                        "layers": row.get("layers", [row.get("layer")]), "component": key[4],
                        "change_required": row.get("change_required", row.get("ordinary_target") != row["forecast_target"]),
                        "control": key[5], "before_effect": old, "after_effect": new,
@@ -92,6 +96,8 @@ def component_summary(before, after):
     from collections import defaultdict
     from paper2.analysis import _seed, cluster_interval
     from .controls import residual_control_summary
+    before, after = list(before), list(after)
+    protocol = completion_protocol(before + after)
     effects = compare_checkpoints(before, after)
     clusters = defaultdict(lambda: defaultdict(list))
     for row in effects:
@@ -156,7 +162,7 @@ def component_summary(before, after):
                 if control != "own" and new[own_key][metric] is not None and old[own_key][metric] is not None:
                     effect = delta - (float(new[own_key][metric]) - float(old[own_key][metric]))
                     pattern_clusters[prefix + "|" + metric + "|training_change_in_effect"][pair].append(effect)
-    return {"paired_effects": effects,
+    return {**protocol, "paired_effects": effects,
             "probability_effects": {k: cluster_interval(v) for k, v in sorted(clusters.items())},
             "consequence_patterns": {k: cluster_interval(v) for k, v in sorted(pattern_clusters.items())},
             "g4_positive_controls": {"before": residual_control_summary(before), "after": residual_control_summary(after)},

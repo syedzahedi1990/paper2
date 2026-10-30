@@ -1,6 +1,8 @@
 # Running Paper 2
 
-Commands below run in this repository with its virtual environment activated. Model commands load weights and consume the hardware on which they are invoked. Run those on the approved Colab/GPU environment. The repository itself never provisions compute. Keep every base/adapter comparison on the same immutable model revision, dataset manifest and prompt format.
+Commands below describe the **active Mistral 24B / `natural_answer_cap_v2` lineage**, with RL beta 0.04 and the 12-candidate constant/no-warmup panel. Read the [29 October model amendment](amendments/2026-10-29-model-and-profiling.md), [30 October outcome-informed completion/KL amendment](amendments/2026-10-30-natural-answer-and-kl.md) and [execution-integrity addendum](amendments/2026-10-30-execution-integrity.md) first. The 12-candidate resource choice preceded full candidate learning on 29 October; only the completion/KL amendment follows the observed pilot outcomes. Original/revised proposal files and historical results remain unchanged.
+
+Run commands in this repository's virtual environment on the specifically approved GPU arrangement. Model commands consume that environment; exporting a matrix does not launch or authorize a run. Keep every base/adapter comparison on revision `9527884be6e5616bdd54de542f9ae13384489724`, the frozen corpus and the declared completion protocol. Existing frozen runs are not modified by updated examples or local documentation.
 
 ## 1. Generate and calibrate
 
@@ -10,10 +12,14 @@ paper2 verify-data --data data/generated/pilot-audit-v5
 paper2 audit-shortcuts --data data/generated/pilot-audit-v5 --output runs/shortcut-audit.json
 paper2 audit-tokenizer \
   --input data/generated/pilot-audit-v5/evaluation/development__*.jsonl \
-  --model Qwen/Qwen2.5-3B-Instruct --output runs/cue-tokenizer-audit.json
+  --model mistralai/Mistral-Small-24B-Instruct-2501 --output runs/cue-tokenizer-audit.json \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 paper2 init-gates --output runs/review.json
 paper2 evaluate --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
-  --reader base --output runs/base-development.jsonl
+  --reader base --output runs/base-development.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 analyze accuracy --input runs/base-development.jsonl --output runs/base-development-summary.json
 ```
 
@@ -21,15 +27,15 @@ Use a new schema-v3 corpus with audit v5. G0 re-verifies file hashes, split sepa
 
 Review base development direct accuracy and its whole-story interval against chance (1/6) and ceiling (1). The named G0 reviewer judges whether difficulty leaves room to observe learning and whether the known heuristic behavior permits the planned interpretations. Settings must contain `difficulty_review` with `estimate`, `ci95` and a written `relation_to_chance_and_ceiling`. No numeric margin is invented. Adjust `--depths`, `--distractor-events` or `--hidden-move` only during pilot calibration; if needed generate a new directory and document why, without inspecting confirmation outcomes.
 
-Freeze the final corpus configuration, the pretraining estimands and analyses in [PREREGISTRATION.md](PREREGISTRATION.md), the training settings/optional development-selection rule, editing model/procedure and Test 3 layer policy. The primary Test 3 band is every layer from 1 through the final model layer, resolved for each architecture; there is no layer-6 tuning choice. Freeze `g4_layer_policy: "all_after_embedding_layer"` and the pilot evidence list `g4_test_layers: [1, 2, …, 35]` (write every integer in the actual JSON). The pilot list binds 3B receipts; the policy resolves the 7B run to layers 1–27. Evidence and reviewer decisions must be tied to the frozen artifacts. Exact construction/length/entity matching, leakage, hashes and complete-panel checks remain mandatory integrity requirements. G0–G4 are pilot go/no-go reviews of whether measurements work; confirmation measures and reports the frozen estimands, including null or imprecise results.
+Freeze the final corpus, estimands in [PREREGISTRATION.md](PREREGISTRATION.md), current training panel, editor procedure and Test 3 policy in the declared lineage. The active primary Test 3 band is layers **1–39** for Mistral 24B. Set `g4_layer_policy: "all_after_embedding_layer"` and `g4_test_layers: [1, 2, …, 39]`, writing every integer in actual JSON. Bind the exact [model amendment](MODEL_PLAN.md) and review evidence. The historical Qwen band lists are not current evidence. Exact construction/length/entity matching, no leakage, hashes and complete panels remain integrity requirements; empirical magnitudes have no invented pass marks.
 
-Before recording G0, freeze the choice of the reference configuration or the broader development panel described in [TRAINING.md](TRAINING.md). Zhong's rates are reference candidates because its LoRA/full-fine-tuning parameterization is unspecified. To prepare the panel without launching any runs:
+Freeze the costed current development panel before candidate learning, using same-protocol resource profiles and the dated resource decision. Zhong's rates are reference candidates because its LoRA/full-fine-tuning parameterization is unspecified. Prepare the active panel without launching runs:
 
 ```bash
 paper2 matrix --stage pilot --development-panel --output runs/development-panel
 ```
 
-This writes 24 runnable configurations and `selection_plan.json`, binding each configuration's file hash. Rates are ×1/3/10/30 the reference, with two fixed schedules. Include the plan in G0's frozen settings/evidence. Cost all 24 runs, their evaluations and retained adapters before choosing the panel; this is eight times the one-setting pilot run count. Use each exported configuration in the commands below with a separate output directory and base initialization. Retain every candidate's final native development score, interval, failures and cost. Apply the unchanged family selection and tie-breaking rule, document the result, and copy the selected family rate/schedule into the final configurations before freezing confirmation. The shipped pilot and confirmatory JSON files remain provisional ×1 references.
+This exports **12** current configurations and `selection_plan.json`, binding their file hashes: all three pilot arms at rates ×1/3/10/30, constant schedule, no warmup, natural completion and amended beta. Include the registry and cost decision in the required evidence before training. The historical 24-candidate/two-schedule export requires `--design legacy_proposal` and is for historical inspection only. Retain every candidate score, interval, failure and cost. Apply the unchanged family selection/tie rule only to the complete amended panel; transfer selected settings to confirmation only after its separate gates and cost approval. `configs/amended_20261030/` supplies current ×1 references; `configs/pilot/` and `configs/profile_3b.json` preserve historical settings.
 
 After the investigator's actual G0 review:
 
@@ -42,26 +48,26 @@ paper2 freeze-calibration --review runs/review.json \
 
 ## 2. Profile, then run the pilot
 
-On the intended GPU, run the disposable profiling arm. The supplied five-step configuration is an initial check; increase its duration until timings represent steady-state generation, update and checkpoint behavior. Record the actual GPU and use occupied GPU time for costs.
+Prepare one profile config per pilot arm from its current amended ×1 reference. Set `stage: "profile"`, `profile: true`, `max_steps: 5`, and both evaluation intervals and the save interval to 5; retain the amended model, revision, protocol, beta and memory arrangement. The example assumes the reasoning-RL profile was saved as `runs/profile-configs/reasoning_rl.json`. Profile all three arms separately from fresh base weights, with full 120-story immediate/native panels at zero and final. A declared fresh 25-update extension may be chosen on resource stability before that extension, never on accuracy. Record the actual GPU and all resource limitations; do not use historical 3B/beta-zero profiles.
 
 ```bash
-paper2 profile --config configs/profile_3b.json \
+paper2 profile --config runs/profile-configs/reasoning_rl.json \
   --input data/generated/pilot-audit-v5/training/clean.jsonl \
   --development data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --corpus-manifest data/generated/pilot-audit-v5/manifest.json \
-  --gates runs/review.json --output runs/profile-3b
+  --gates runs/review.json --output runs/profile-reasoning-rl
 
-paper2 train --config configs/pilot/reasoning_rl_clean_seed1.json \
+paper2 train --config runs/development-panel/reasoning_rl_clean_seed1_lr-x1_constant.json \
   --input data/generated/pilot-audit-v5/training/clean.jsonl \
   --development data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --corpus-manifest data/generated/pilot-audit-v5/manifest.json \
-  --gates runs/review.json --profile-report runs/profile-3b/profile_report.json \
+  --gates runs/review.json --profile-report runs/profile-reasoning-rl/profile_report.json \
   --output runs/pilot-reasoning-rl
 ```
 
-The shipped RL schedule measures immediate-answer accuracy and retains an adapter at steps 0, 50, …, 2,000 (41 checkpoints), while native traces run only at 0, 250, …, 2,000 (9 panels). SFT uses 25 steps for both formats; the short profile uses 5. Both schedules include off-interval final steps. The profile records separate native/immediate evaluation times and panel counts, generated tokens and snapshot bytes; combined-only older reports cannot authorize training. For 120 development stories, each default RL run makes 4,920 immediate forward passes and 1,080 native generations. The one-setting pilot retains 93 evaluated adapters (744 for the full development panel) and the confirmatory grid 624, in addition to rotating optimizer checkpoints and final adapters. The full-pool projection is for the same arm and model only. The proposal’s 15–25 hours for the whole pilot remains unverified. Account for all arms, sequential native evaluation, storage, control generation and later Tests 1–3 before approving compute.
+The shipped RL schedule measures immediate-answer accuracy and retains an adapter at steps 0, 50, …, 2,000 (41 checkpoints), while native traces run only at 0, 250, …, 2,000 (9 panels). SFT uses 25 steps for both formats; the short profile uses 5. Both schedules include off-interval final steps. The profile records separate native/immediate evaluation times and panel counts, generated tokens and snapshot bytes; combined-only older reports cannot authorize training. For 120 development stories, each default RL run makes 4,920 immediate forward passes and 1,080 native generations. The one-setting pilot retains 93 evaluated adapters (372 for the active 12-candidate panel) and the confirmatory grid 624, in addition to rotating optimizer checkpoints and final adapters. The full-pool projection is for the same arm and model only. The proposal’s 15–25 hours for the whole pilot remains unverified. Account for all arms, sequential native evaluation, storage, control generation and later Tests 1–3 before approving compute.
 
-Repeat with the answer-RL and label-SFT pilot configurations, starting each from the base model. Keep the generated profile's memory/generation arrangement fixed. The profile adapter is not a starting checkpoint for any arm. Resume interruptions using `--resume-from-checkpoint runs/ARM/checkpoint-N` with the original output directory, configuration and data.
+Repeat profiling for answer RL and label SFT, then freeze the complete costed 12-candidate registry before candidate learning. The training command above illustrates one registered candidate; execute every registered setting independently from the pinned base with distinct outputs. A profile adapter is never an initialization. Preserve interrupted attempts and their evidence. The current supervised panel does not authorize automatic retries or resumption; the lower-level runner's resume option is not permission to alter its frozen execution plan.
 
 G1 must review **all three pilot arms** in native and immediate formats, including step zero and the final step. Each completed run writes a schema-3 `g1_learning_evidence.json` binding the complete checkpoint summaries, predictions, manifest and compute report by hash. In `runs/review.json`, add one entry per arm to `gates.G1.learning_curves`, and include the same receipt paths/hashes in `gates.G1.evidence`. Paths are relative to the review file. Each learning-curve entry has this shape (replace the placeholders with actual hashes and review notes):
 
@@ -79,13 +85,31 @@ paper2 verify-g1 --review runs/review.json --output runs/g1-learning-summary.jso
 
 This read-only check does not mark G1 passed. It verifies common 120-story development panels, complete schedules, completed runs and artifact hashes; its intervals use 20,000 whole-story resamples. The paid-run check requires these three receipts and interpretations alongside the named reviewer's actual G1 decision. Record that decision only after inspecting the evidence, including an arm that did not move.
 
+G1 also includes cap exhaustion/failure, validity, duplication, repetition and descriptive length evidence. Preserve `checkpoint_trace_health.jsonl` schema-1 bytes and verify its original calculation exactly. Produce a new additive length report from the raw saved tokens:
+
+```bash
+paper2 trace-health --input runs/pilot-reasoning-rl/checkpoint_predictions.jsonl \
+  --original-health runs/pilot-reasoning-rl/checkpoint_trace_health.jsonl \
+  --output runs/g1-trace-health-lengths-v2.json
+```
+
+The report provides complete-response token lengths, trace character/whitespace-word counts, distributions and intervals without a minimum length or repetition cutoff. Optional pinned tokenizer attribution reports actual sampled trace-prefix counts only where exact; boundary-spanning tokens receive bounds and a separately labelled re-tokenized proxy. The frozen editor must classify **all 1,080 saved direct-question traces** across the selected reasoning-RL run's nine native checkpoints, including short, wrong and malformed responses. Prepare/freeze that source manifest and editor plan before classification; do not regenerate checkpoint traces or invent sampled IDs. `paper2 g1-editability` separates prepare, generate, finalize and resource accounting; see the [execution-integrity addendum](amendments/2026-10-30-execution-integrity.md) for its input binding. Missing editor outcomes remain unassessed. A model classification job does not complete the later G3 random human audit.
+
+Use `paper2 verify-g1 --historical` only to inspect superseded evidence. It does not approve the current gate or make old completion/KL configurations eligible for current selection.
+
 ## 3. Test 1 and matched accuracy
 
 ```bash
 paper2 evaluate --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
-  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --output runs/trained-immediate.jsonl
+  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --output runs/trained-immediate.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 evaluate --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
-  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --reasoning --output runs/trained-native.jsonl
+  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --reasoning --output runs/trained-native.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 analyze transfer --baseline runs/base-development.jsonl \
   --input runs/trained-immediate.jsonl --output runs/no-trace-transfer.json
 ```
@@ -109,10 +133,16 @@ The primary confirmatory edit measurement uses a frozen direct-question trace (`
 
 ```bash
 paper2 traces --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
-  --source base --timing direct_fixed --output runs/traces-base.jsonl
+  --source base --timing direct_fixed --output runs/traces-base.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 traces --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --source trained \
-  --timing direct_fixed --output runs/traces-trained.jsonl
+  --timing direct_fixed --output runs/traces-trained.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 prepare-edits --traces runs/traces-base.jsonl runs/traces-trained.jsonl \
   --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --stage pilot --max-worlds 12 --seed 2026 --output runs/edit-templates.json
@@ -145,22 +175,30 @@ Generate edited continuations once with **each original source checkpoint**, bef
 ```bash
 paper2 regenerate-traces --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --traces runs/traces-base.jsonl --source base --edits runs/generated-edits.json \
-  --edit-audit runs/edit-audit.json --output runs/regenerated-base.jsonl
+  --edit-audit runs/edit-audit.json --output runs/regenerated-base.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 paper2 regenerate-traces --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --traces runs/traces-trained.jsonl --source trained --edits runs/generated-edits.json \
   --edit-audit runs/edit-audit.json --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 \
-  --output runs/regenerated-trained.jsonl
+  --output runs/regenerated-trained.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 
 paper2 crossed --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --traces runs/traces-base.jsonl runs/traces-trained.jsonl --edits runs/generated-edits.json \
   --edit-audit runs/edit-audit.json \
   --regenerated runs/regenerated-base.jsonl runs/regenerated-trained.jsonl \
-  --reader base --output runs/crossed-base.jsonl
+  --reader base --output runs/crossed-base.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 paper2 crossed --input data/generated/pilot-audit-v5/evaluation/development__clean.jsonl \
   --traces runs/traces-base.jsonl runs/traces-trained.jsonl --edits runs/generated-edits.json \
   --edit-audit runs/edit-audit.json \
   --regenerated runs/regenerated-base.jsonl runs/regenerated-trained.jsonl \
-  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --output runs/crossed-trained.jsonl
+  --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 --reader trained --output runs/crossed-trained.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 ```
 
 Both readers consume identical effective controls, including recorded human corrections, and the same source-frozen continuations. All candidates retain original rows with final and initial edit-status fields; uneditable/failed candidates require no semantic regeneration. Report editability rates by source/checkpoint and conditional targeted-effect estimates with candidate, eligible and common-support denominators. Changed/intact forecasts use the stated-before versus stated-after belief; ordinary accuracy still uses the true world. The direct trace is written before later questions/events are shown and held fixed across views; no novel story-summary prompt is used. `prequestion` remains an alias for `direct_fixed`. Question-dependent timing is a pilot or supplemental diagnostic: collect it with `--timing question_dependent` and separate artifact/edit files. It cannot replace the primary confirmatory edit measurement. Raw-token replay and re-rendered replay retain separate eligibility and match rates.
@@ -176,20 +214,24 @@ paper2 analyze crossed --baseline runs/baselines.jsonl \
 
 ## 5. Test 3
 
-The default primary mask is **every layer from 1 through the last layer**, jointly for K, V and residual outputs. The default also records individual-layer swaps descriptively. This is 1–35 for the pinned 36-block 3B model and 1–27 for the pinned 28-block 7B model. No `--all-layers`, selected layer-6 start or manual list is needed:
+The default primary mask is **every layer from 1 through the last layer**, jointly for K, V and residual outputs. The default also records individual-layer swaps descriptively. This is **1–39 for the active pinned 40-block Mistral 24B model** in both stages. No `--all-layers`, selected layer-6 start or manual list is needed:
 
 ```bash
 paper2 components --input data/generated/pilot-audit-v5/pairs/development.jsonl \
-  --model Qwen/Qwen2.5-3B-Instruct --output runs/components-base.jsonl
+  --model mistralai/Mistral-Small-24B-Instruct-2501 --output runs/components-base.jsonl \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 components --input data/generated/pilot-audit-v5/pairs/development.jsonl \
-  --model Qwen/Qwen2.5-3B-Instruct \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
   --adapter runs/pilot-reasoning-rl/adapter --training-seed 1 \
-  --output runs/components-trained.jsonl
+  --output runs/components-trained.jsonl \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724 \
+  --completion-protocol natural_answer_cap_v2
 paper2 analyze components --baseline runs/components-base.jsonl \
   --input runs/components-trained.jsonl --output runs/component-changes.json
 ```
 
-For confirmation, use the 7B model, the corresponding adapters and confirmation pairs. Within each checkpoint, natural donor, own, and signed-permutation displacement-null panels accompany every component mask. Primary matched-event analysis uses oracle-derived changed and intact consequence sets, their joint pattern and whole-story intervals. G4 evidence must retain complete, structurally aligned joint K/V/residual panels for the primary band. Inspect residual effects and the nulls with intervals; a named pilot reviewer decides whether this supports detecting and interpreting key/value effects. The code does not require a positive point estimate. Per-layer results are descriptive and do not select a favorable primary band.
+For confirmation, use the same pinned Mistral 24B model, the corresponding adapters and confirmation pairs. Within each checkpoint, natural donor, own, and signed-permutation displacement-null panels accompany every component mask. Primary matched-event analysis uses oracle-derived changed and intact consequence sets, their joint pattern and whole-story intervals. G4 evidence must retain complete, structurally aligned joint K/V/residual panels for the primary band. Inspect residual effects and the nulls with intervals; a named pilot reviewer decides whether this supports detecting and interpreting key/value effects. The code does not require a positive point estimate. Per-layer results are descriptive and do not select a favorable primary band.
 
 The residual hook runs after that block's own K/V have been computed, so even swapping all residual outputs need not reproduce donor logits. Layer 0 is excluded from the primary measurement; the aligned 1-to-last residual control applies to the same tested path as K/V. Full-depth or custom masks remain explicitly secondary diagnostics and cannot replace primary G4 evidence. Interpret a key/value null against the residual positive control and signed-permutation nulls; a descriptive narrow-layer null does not imply no distributed effect.
 
@@ -204,13 +246,15 @@ paper2 opentom-import --input data/external/opentom.json \
   --output data/external/opentom-evaluation.jsonl \
   --source-url https://github.com/seacowx/OpenToM/blob/3f22b66276b2d7ca5fe573c28c79cc0d077aafc5/data/opentom.json
 paper2 opentom-evaluate --input data/external/opentom-evaluation.jsonl \
-  --output runs/opentom-base.jsonl
+  --output runs/opentom-base.jsonl \
+  --model mistralai/Mistral-Small-24B-Instruct-2501 \
+  --revision 9527884be6e5616bdd54de542f9ae13384489724
 paper2 analyze opentom --input runs/opentom-base.jsonl --output runs/opentom-summary.json
 ```
 
-Repeat with adapters and `--reasoning` for official CoT prompts. The default `--opentom-protocol official` uses pinned official OpenToM system/user text and lexical scoring, with subtype macro-F1 primary, whole-story intervals, exclusion rates and full-denominator diagnostics. Run `--opentom-protocol adapted` separately for the secondary Paper 2 wrapper. Raw outputs remain available. The Qwen wrapper, generation caps and full-corpus selection still differ from some published runs. Zhong reports accuracy/order macro averages and has not released reproducible evaluation details, so do not claim exact numerical replication; see [OpenToM protocol](OPENTOM.md).
+Repeat with adapters and `--reasoning` for official CoT prompts. The default `--opentom-protocol official` uses pinned official OpenToM system/user text and lexical scoring, with subtype macro-F1 primary, whole-story intervals, exclusion rates and full-denominator diagnostics. Run `--opentom-protocol adapted` separately for the secondary Paper 2 wrapper. Raw outputs remain available. The model-specific chat serialization, generation caps and full-corpus selection still differ from some published runs. Zhong reports accuracy/order macro averages and has not released reproducible evaluation details, so do not claim exact numerical replication; see [OpenToM protocol](OPENTOM.md).
 
-After reviewing G0–G4 and recording approved cost, use `configs/confirmatory/` for the full 24-run grid, set `--model Qwen/Qwen2.5-7B-Instruct` for evaluation, and use confirmation shards. Reasoning SFT takes `supervision/clean_reasoning_sft.jsonl` or its shortcut twin; the other arms take `training/*.jsonl`. Retain all three seeds. A second 7B profiling run can use a confirmatory config with `profile: true`, after paid approval, and the 3B profile as initial evidence; use the resulting target-size profile for the main 7B runs.
+After measured G0–G4 reviews and separate cost approval, freeze the selected family settings in the intended `configs/confirmatory/` 24-run grid and use confirmation shards. Both stages use pinned Mistral 24B, `natural_answer_cap_v2`, and beta 0.04 for RL. Reasoning SFT takes `supervision/clean_reasoning_sft.jsonl` or its shortcut twin; other arms take `training/*.jsonl`. Retain all three seeds. Each production arm needs a compatible measured profile; the still-needed reasoning-SFT profile is not inferred from other arms. The explicit `target_profile_bootstrap` path can support an initial confirmatory profile only after its required gates/cost approval; it does not authorize the full grid. The current pilot resource decision alone does not approve confirmation.
 
 The named pilot reviewers see estimates and intervals, structural checks and the relevant positive controls, then record their decisions and rationale. Confirmation does not rerun numerical success gates or assign quadrant categories. Plot each arm as a point with intervals on both axes and discuss the proposal's candidate readings. The £500 total ceiling and 14 December 2026 review remain fixed.
 

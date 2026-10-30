@@ -41,7 +41,8 @@ def test_official_opentom_import_is_external_and_keeps_raw_targets(tmp_path):
 def test_primary_protocol_defaults_and_removed_numerical_pass_flags():
     import pytest
     from paper2.cli import parser
-    args = parser().parse_args(["components", "--input", "rows.jsonl", "--output", "out.jsonl"])
+    args = parser().parse_args(["components", "--input", "rows.jsonl", "--output", "out.jsonl",
+                               "--completion-protocol", "natural_answer_cap_v2"])
     assert args.layers is None and not args.all_layers and args.layer_mode == "both"
     args = parser().parse_args(["opentom-evaluate", "--input", "rows.jsonl", "--output", "out.jsonl"])
     assert args.opentom_protocol == "official"

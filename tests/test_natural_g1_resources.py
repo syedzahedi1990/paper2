@@ -6,28 +6,36 @@ import pytest
 
 from paper2.gates import _g1_editor_measurements, verify_g1_learning_curves
 from paper2.io import file_digest, read_jsonl, write_json, write_jsonl
-from paper2.training.config import NATURAL_COMPLETION_PROTOCOL, TrainingConfig
+from paper2.training.config import LEGACY_COMPLETION_PROTOCOL, NATURAL_COMPLETION_PROTOCOL, TrainingConfig
 from paper2.training.model_plan import assert_profile_identity, calibrated_model_plan
 from paper2.training.trace_health import summarize_trace_health
+from paper2.training.selection import amended_experiment_matrix
 from test_g1_curves import g1_panel, rebind  # noqa: F401
 
 
 @pytest.fixture
-def revised_g1(request):
+def revised_g1(request, monkeypatch):
     gate, root = request.getfixturevalue('g1_panel')
     gate['status'] = 'pending'
+    configs = {config.arm: config.to_dict() for config in amended_experiment_matrix('pilot')}
+    model_identity = {key: configs['reasoning_rl'][key] for key in ('model', 'revision')}
+    plan = {'pilot': model_identity, 'confirmatory': model_identity,
+            'amendment_sha256': configs['reasoning_rl']['model_amendment_sha256']}
+    # File-backed model-amendment verification has separate integrity tests.
+    monkeypatch.setattr('paper2.training.model_plan.calibrated_model_plan', lambda *_: plan)
     for arm in ('reasoning_rl', 'answer_rl', 'label_sft'):
         output = root / arm
         path = output / 'run_manifest.json'
         manifest = json.loads(path.read_text())
-        manifest['config']['completion_protocol'] = NATURAL_COMPLETION_PROTOCOL
-        manifest['config']['beta'] = .04 if arm.endswith('_rl') else 0
+        manifest['config'].update({key: configs[arm][key] for key in
+                                  ('model', 'revision', 'model_amendment_sha256',
+                                   'completion_protocol', 'beta', 'lr_scheduler_type', 'warmup_ratio')})
         write_json(path, manifest)
-        metrics = [{**row, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL}
+        metrics = [{**row, **model_identity, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL}
                    for row in read_jsonl(output / 'checkpoint_evaluations.jsonl')]
         predictions = []
         for row in read_jsonl(output / 'checkpoint_predictions.jsonl'):
-            value = {**row, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL}
+            value = {**row, **model_identity, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL}
             if row['format'] == 'native_reasoning':
                 value.update({'completion': 'Answer: A.' if row['correct'] else 'loop loop',
                               'completion_ids': [1, 2, 3, 4] if row['correct'] else [9] * 384})
@@ -45,7 +53,7 @@ def revised_g1(request):
         receipt_path = output / 'g1_learning_evidence.json'
         receipt = json.loads(receipt_path.read_text())
         for key in ('baseline', 'latest', 'immediate_latest'):
-            receipt[key]['completion_protocol'] = NATURAL_COMPLETION_PROTOCOL
+            receipt[key].update({**model_identity, 'completion_protocol': NATURAL_COMPLETION_PROTOCOL})
         write_json(receipt_path, receipt)
         rebind(gate, root, arm)
     return gate, root
@@ -62,6 +70,22 @@ def test_revised_g1_reports_unfavorable_health_and_unassessed_editability_withou
     assert all(row['trace_health']['status'] == 'not_assessed' for row in result['label_sft']['trace_health'])
     assert result['reasoning_rl']['trace_health_artifact']['sha256']
     assert result['reasoning_rl']['editor_editability']['status'] == 'not_assessed'
+    assert result['reasoning_rl']['eligible_for_current_g1'] is True
+    assert result['reasoning_rl']['gate_decision'] == 'not_applied_by_evidence_inspection'
+    assert result['reasoning_rl']['trace_health_lengths']['schema_version'] == 2
+
+
+@pytest.mark.parametrize('field,value', [('beta', 0.), ('lr_scheduler_type', 'constant_with_warmup'),
+                                       ('warmup_ratio', .05)])
+def test_current_g1_rejects_superseded_training_settings_even_with_revised_parser(revised_g1, field, value):
+    gate, root = revised_g1
+    path = root / 'reasoning_rl' / 'run_manifest.json'
+    manifest = json.loads(path.read_text())
+    manifest['config'][field] = value
+    write_json(path, manifest)
+    rebind(gate, root, 'reasoning_rl')
+    with pytest.raises(ValueError, match='Superseded configuration'):
+        verify_g1_learning_curves(gate, root, samples=20)
 
 
 def test_revised_g1_pass_cannot_treat_missing_editor_measurement_as_assessed(revised_g1):
@@ -114,6 +138,32 @@ def test_g1_cannot_mix_old_and_revised_runs(revised_g1):
     rebind(gate, root, 'answer_rl')
     with pytest.raises(ValueError, match='common completion protocol'):
         verify_g1_learning_curves(gate, root, samples=20)
+
+
+def test_all_legacy_mistral_arms_are_historical_evidence_not_a_current_g1(revised_g1):
+    gate, root = revised_g1
+    gate['status'] = 'pass'  # An archived pass cannot lift current eligibility.
+    for arm in ('reasoning_rl', 'answer_rl', 'label_sft'):
+        output = root / arm
+        path = output / 'run_manifest.json'
+        manifest = json.loads(path.read_text())
+        manifest['config'].update(completion_protocol=LEGACY_COMPLETION_PROTOCOL, beta=0.)
+        write_json(path, manifest)
+        for filename in ('checkpoint_evaluations.jsonl', 'checkpoint_predictions.jsonl'):
+            write_jsonl(output / filename, [{**row, 'completion_protocol': LEGACY_COMPLETION_PROTOCOL}
+                                            for row in read_jsonl(output / filename)])
+        receipt_path = output / 'g1_learning_evidence.json'
+        receipt = json.loads(receipt_path.read_text())
+        receipt['completion_protocol'] = LEGACY_COMPLETION_PROTOCOL
+        for key in ('baseline', 'latest', 'immediate_latest'):
+            receipt[key]['completion_protocol'] = LEGACY_COMPLETION_PROTOCOL
+        write_json(receipt_path, receipt)
+        rebind(gate, root, arm)
+    with pytest.raises(ValueError, match='Superseded configuration'):
+        verify_g1_learning_curves(gate, root, samples=20)
+    historical = verify_g1_learning_curves(gate, root, samples=20, historical=True)
+    assert all(row['eligible_for_current_g1'] is False for row in historical.values())
+    assert all(row['gate_decision'] == 'not_applied_by_evidence_inspection' for row in historical.values())
 
 
 def test_model_plan_requires_revised_beta_and_protocol_in_nonbootstrap_profile():

@@ -1,12 +1,17 @@
 """Integrity-only G1 evidence checks; flat learning curves remain reviewable."""
 import json
+from functools import partial
 
 import pytest
 
-from paper2.gates import verify_g1_learning_curves
+from paper2.gates import verify_g1_learning_curves as verify_current_g1_learning_curves
 from paper2.io import file_digest, read_jsonl, write_json, write_jsonl
 from paper2.training.config import TrainingConfig
 from paper2.training.runner import finalize_g1_learning_evidence
+
+# These fixtures deliberately reproduce the old schema and original model plan.
+# Integrity tests may inspect them but must not silently approve a current G1.
+verify_g1_learning_curves = partial(verify_current_g1_learning_curves, historical=True)
 
 
 @pytest.fixture
@@ -60,6 +65,9 @@ def test_flat_learning_curves_are_complete_evidence_without_improvement_threshol
     result = verify_g1_learning_curves(gate, root, samples=200, expected_manifest_sha256='2' * 64)
     assert set(result) == {'reasoning_rl', 'answer_rl', 'label_sft'}
     assert all(item['native_accuracy_gain'] == item['immediate_accuracy_gain'] == 0 for item in result.values())
+    assert all(item['eligible_for_current_g1'] is False for item in result.values())
+    with pytest.raises(ValueError, match='Superseded configuration'):
+        verify_current_g1_learning_curves(gate, root, samples=20)
 
 
 def test_missing_sft_arm_is_not_a_complete_g1_review(g1_panel):
@@ -160,14 +168,14 @@ def test_verify_g1_cli_writes_report_without_changing_pending_gate(g1_panel, mon
     monkeypatch.setattr(paper2.gates, "verify_g1_learning_curves",
                         lambda *args, **kwargs: verifier(*args, **kwargs, samples=200))
     output = root / "g1-report.json"
-    main(["verify-g1", "--review", str(review), "--output", str(output)])
+    main(["verify-g1", "--review", str(review), "--output", str(output), "--historical"])
     report = json.loads(output.read_text())
     assert report["review_sha256"] == file_digest(review)
     assert set(report["learning_curves"]) == {"reasoning_rl", "answer_rl", "label_sft"}
     assert all(item["native_gain_interval"]["ci95"] == [0., 0.] for item in report["learning_curves"].values())
     assert review.read_bytes() == original
     with pytest.raises(ValueError, match="overwrite|review"):
-        main(["verify-g1", "--review", str(review), "--output", str(review)])
+        main(["verify-g1", "--review", str(review), "--output", str(review), "--historical"])
     assert review.read_bytes() == original
 
 

@@ -19,6 +19,9 @@ def reviewed(tmp_path, monkeypatch):
     monkeypatch.setattr("paper2.gates.validate_calibration_manifest", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g4_positive_control", lambda *_, **__: None)
     monkeypatch.setattr("paper2.gates.verify_g1_learning_curves", lambda *_, **__: None)
+    # Original-model fixtures isolate the pre-existing evidence/cost checks.
+    # Current amendment eligibility is tested independently without this stub.
+    monkeypatch.setattr("paper2.gates.assert_current_design", lambda *_: None)
     evidence = tmp_path / "evidence.json"
     write_json(evidence, {"measured": True})
     review = initial_review()

@@ -1,3 +1,11 @@
+# Execution integrity correction — 30 October 2026
+
+**642 tests passed**, with zero failures or skips, on the pinned CPU stack with plotting installed. Ruff, `git diff --check` and 21 documented CLI parsing checks pass. [Exact tested-source evidence](validation/execution-integrity-20261030.json) records file hashes and package versions; source/test bytes stayed unchanged throughout the combined run. Windows and the no-torch environment were not rerun for this patch.
+
+Coverage includes the exact amended 12-file exporter, current-versus-historical eligibility, additive lengths and merged-token boundaries, saved-token G1 extraction, durable editor journaling/resumption and resource reporting, source-bound profiles, explicit CLI protocols and rejection of mixed analyses. The [cached real Mistral tokenizer smoke check](validation/mistral-natural-completion-smoke-20261030.json) confirms zero reward for a constructed 384-token know loop, optional-period acceptance, and rejection of double periods/trailing prose. It loads no model weights and is not a learning outcome.
+
+The active frozen panel remains on its original source. Actual editor classifications, human G3 audit and later scientific gates are still outstanding. See the [dated integrity addendum](amendments/2026-10-30-execution-integrity.md).
+
 # Latest execution patch — profile resource timing
 
 **438 tests passed** on the pinned CPU stack. Ruff and `git diff --check` pass. [Exact-file evidence](validation/resource-timing-validation.json) covers the profile-only timing journal: baseline after initial evaluation, one cumulative record before each step evaluation, and explicit append-only resume segments. Final reports retain all evaluation and saving costs. Ordinary candidate training is unchanged. The [resource extension decision](amendments/2026-10-29-resource-profiling-extension.md) activates the already-declared 25-update profiles; this certificate is not a scientific gate or full-study cost approval.

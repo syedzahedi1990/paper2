@@ -2,6 +2,7 @@
 from collections import defaultdict
 import numpy as np
 from .data import VIEWS
+from .protocols import completion_protocol
 
 JOINT_ALIGNMENT = (
     "Joint correctness requires all eight views of the same underlying world, cue condition and literal cue location. "
@@ -15,6 +16,8 @@ def _seed(row):
 
 
 def _index(rows, *, require_balanced_seeds=True):
+    rows = list(rows)
+    completion_protocol(rows)
     result = {}
     for row in rows:
         key = (_seed(row), row["world_id"], row["view"], row.get("cue_condition", "clean"), row.get("cue_location", ""))
@@ -31,6 +34,7 @@ def _index(rows, *, require_balanced_seeds=True):
 
 def paired_rows(base, other, *, require_balanced_seeds=True):
     base, other = list(base), list(other)
+    completion_protocol(base + other)
     seeds = {_seed(r) for r in other}
     if {_seed(r) for r in base} == {None} and seeds and None not in seeds:
         base = [{**r, "training_seed": seed} for seed in seeds for r in base]
@@ -108,6 +112,7 @@ def _joint_patterns(rows):
 
 def accuracy_summary(rows, seed=2026, samples=20_000):
     rows = list(rows)
+    protocol = completion_protocol(rows)
     _index(rows)
     by_view, overall = defaultdict(lambda: defaultdict(lambda: defaultdict(list))), defaultdict(lambda: defaultdict(list))
     for row in rows:
@@ -132,7 +137,7 @@ def accuracy_summary(rows, seed=2026, samples=20_000):
     for world, _, _, correct in patterns:
         joint_by_world[world].append(int(correct))
     joint_interval = cluster_interval(joint_by_world, seed, samples)
-    return {"n": len(rows), "accuracy": total["estimate"], "ci95": total["ci95"], "stories": total["stories"],
+    return {**protocol, "n": len(rows), "accuracy": total["estimate"], "ci95": total["ci95"], "stories": total["stories"],
             "micro_accuracy": float(np.mean([row["prediction"] == row["answer"] for row in rows])) if rows else None,
             "per_view": views, "joint_all_eight": joint_interval["estimate"],
             "joint_all_eight_ci95": joint_interval["ci95"], "joint_all_eight_stories": joint_interval["stories"],
@@ -144,6 +149,7 @@ def accuracy_summary(rows, seed=2026, samples=20_000):
 
 def transfer(base, trained, seed=2026, samples=20_000):
     base, trained = list(base), list(trained)
+    protocol = completion_protocol(base + trained)
     groups = defaultdict(lambda: defaultdict(list))
     ratio_groups = defaultdict(lambda: defaultdict(lambda: np.zeros(4)))
     preserved, baseline_correct, repairs, errors = 0, 0, 0, 0
@@ -167,7 +173,7 @@ def transfer(base, trained, seed=2026, samples=20_000):
     ratios = {world: np.mean(list(seeds.values()), axis=0) for world, seeds in ratio_groups.items()}
     preservation = _ratio_interval({world: values[:2] for world, values in ratios.items()}, seed, samples)
     repair = _ratio_interval({world: values[2:] for world, values in ratios.items()}, seed, samples)
-    return {"estimand": "trained_minus_base_direct_answer_accuracy",
+    return {**protocol, "estimand": "trained_minus_base_direct_answer_accuracy",
             "effects": {k: cluster_interval(v, seed, samples) for k, v in sorted(groups.items())},
             "preservation": {"correct_before": baseline_correct, "still_correct": preserved,
                              **preservation, "rate": preservation["estimate"]},
@@ -712,6 +718,8 @@ def _paired_edit_source_comparisons(cells, seed=2026, samples=20_000):
 
 def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
                     base_source=None, trained_source=None, seed=2026, samples=20_000):
+    no_trace, crossed = list(no_trace), list(crossed)
+    protocol = completion_protocol(no_trace + crossed)
     baselines, cells = defaultdict(list), defaultdict(list)
     for r in no_trace:
         baselines[r["reader"]].append(r)
@@ -771,7 +779,7 @@ def crossed_summary(no_trace, crossed, *, base_reader=None, trained_reader=None,
         contrasts = _crossed_original_contrasts(baselines, cells, identities, seed=seed, samples=samples)
     else:
         contrasts = {"status": "identities_required", "reason": "Supply unambiguous base/trained reader and source labels"}
-    return {"cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells, seed, samples),
+    return {**protocol, "cells": output, "original_2x2": contrasts, "controls": _trace_control_summary(cells, seed, samples),
             "editability": _editability_summary(cells, seed, samples),
             "paired_edit_source_comparisons": _paired_edit_source_comparisons(cells, seed, samples),
             "identities": dict(zip(("base_reader", "trained_reader", "base_source", "trained_source"), identities)),
@@ -793,6 +801,7 @@ def match_checkpoints(dev_summaries, *, expected_runs=None):
     from .io import file_digest
     from .training.config import ARMS
     dev_summaries = list(dev_summaries)
+    protocol = completion_protocol(dev_summaries)
     if any(row.get("split") != "development" for row in dev_summaries):
         raise ValueError("Accuracy matching must use development data only")
 
@@ -860,7 +869,7 @@ def match_checkpoints(dev_summaries, *, expected_runs=None):
         matches[key] = {"checkpoint": checkpoint, "maximum_reached_accuracy": maxima[key],
                         "actual_accuracy": checkpoint["accuracy"], "accuracy_gap": gap,
                         "absolute_accuracy_gap": abs(gap), "evaluated_checkpoints": len(rows)}
-    return {"method": "highest_common_reached_accuracy_nearest_saved_checkpoint_v1",
+    return {**protocol, "method": "highest_common_reached_accuracy_nearest_saved_checkpoint_v1",
             "target_accuracy": target, "comparison_set": sorted(by_run),
             "comparison_set_source": "validated_expected_runs" if declared is not None else "supplied_development_measurements",
             "excluded_base_records": base_records, "matches": matches,
@@ -871,6 +880,8 @@ def match_checkpoints(dev_summaries, *, expected_runs=None):
 
 
 def cue_summary(rows):
+    rows = list(rows)
+    completion_protocol(rows)
     groups = defaultdict(list)
     for row in rows:
         groups[row["cue_condition"]].append(row)

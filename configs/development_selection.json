@@ -1,6 +1,19 @@
 {
-  "candidate_runs": 24,
-  "method": "pilot_lora_rate_panel_v1",
+  "authorization": "Export only; requires a separately frozen costed registry and measured gates. Confirmation remains unapproved.",
+  "beta_by_family": {
+    "rl": 0.04,
+    "sft": 0.0
+  },
+  "candidate_runs": 12,
+  "completion_protocol": "natural_answer_cap_v2",
+  "design": "amended_20261030",
+  "excluded_panels": [
+    "superseded pre-amendment completion/KL panel"
+  ],
+  "initialization": "Each candidate independently initializes from the pinned untrained base",
+  "method": "amended_pilot_lora_rate_panel_20261030",
+  "model": "mistralai/Mistral-Small-24B-Instruct-2501",
+  "model_amendment_sha256": "87dcbf696fb2f995e0f3632713f2fd4b829386494cb135c8502455abdca7aa88",
   "pilot_arms": [
     "reasoning_rl",
     "answer_rl",
@@ -16,18 +29,15 @@
     "rl": 2e-05,
     "sft": 1e-06
   },
-  "resource_note": "Eight settings per pilot arm: 24 runs, eight times the one-setting pilot run count. Profile and cost all candidates, evaluation and retained adapters before selecting this panel. No training or purchase is launched by export.",
+  "resource_note": "Four constant/no-warmup settings per pilot arm: 12 full-exposure runs. Bind current source, same-protocol profiles, corpus and cost evidence before candidate learning. Export does not launch training or authorize confirmation.",
+  "revision": "9527884be6e5616bdd54de542f9ae13384489724",
   "schedules": [
     {
       "lr_scheduler_type": "constant",
       "warmup_ratio": 0.0
-    },
-    {
-      "lr_scheduler_type": "constant_with_warmup",
-      "warmup_ratio": 0.05
     }
   ],
-  "schema_version": 1,
+  "schema_version": 2,
   "selection": {
     "confirmation": "Never use confirmation outcomes for selection",
     "evaluation": "Final-step native-format accuracy on the same 120 development stories",
@@ -40,7 +50,7 @@
       "no warmup"
     ]
   },
-  "settings_per_arm": 8,
+  "settings_per_arm": 4,
   "source_caution": "Zhong reports these rates but does not specify LoRA versus full fine-tuning. They are reference candidates, not established LoRA optima. The approximate 10x LoRA multiplier is empirical motivation for breadth, not a guaranteed conversion.",
   "sources": [
     "https://arxiv.org/html/2606.09092v1",

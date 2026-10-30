@@ -4,6 +4,7 @@ import math
 from datetime import date
 from pathlib import Path
 from .io import file_digest, write_json
+from .training.selection import assert_current_design
 
 GATES = ("G0", "G1", "G2", "G3", "G4")
 G4_LAYER_POLICY = "all_after_embedding_layer"
@@ -98,11 +99,14 @@ def _g1_editor_measurements(gate, root, predictions):
             'human_audit': 'not_evaluated_by_this_helper'}
 
 
-def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, calibration=None, seed=2026, samples=20_000):
+def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, calibration=None,
+                             seed=2026, samples=20_000, historical=False):
     """Validate every pilot arm and report pointwise/paired story intervals.
 
     Intervals describe the fixed seed-1 pilot over sampled stories, not training
     seed variability. They never impose an improvement or significance cutoff.
+    Historical inspection validates original evidence but cannot approve current
+    G1, even when an archived review contains an old pass decision.
     """
     from .analysis import cluster_interval
     from .io import read_jsonl
@@ -166,6 +170,8 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
         if common_completion_protocol is not None and protocol != common_completion_protocol:
             raise ValueError('G1 pilot arms must use one common completion protocol; legacy and revised runs cannot mix')
         common_completion_protocol = protocol
+        if not historical:
+            assert_current_design(config)
         if receipt.get('completion_protocol', LEGACY_COMPLETION_PROTOCOL) != protocol:
             raise ValueError('G1 learning evidence completion protocol differs from its run')
         if common_revision is not None and identity["revision"] != common_revision:
@@ -269,6 +275,9 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
             gains[fmt] = cluster_interval({row["world_id"]: [int(row["correct"]) - before[row["world_id"]]]
                                           for row in grouped[(final, fmt)]}, seed=seed, samples=samples)
         results[arm] = {"interpretation": entry["interpretation"], "curves": curves,
+                        "review_scope": "historical_inspection" if historical else "current_amendment",
+                        "eligible_for_current_g1": not historical,
+                        "gate_decision": "not_applied_by_evidence_inspection",
                         'completion_protocol': protocol,
                         'trace_health_artifact': trace_health_artifact, 'trace_health': trace_health,
                         "native_accuracy_gain": gains[native]["estimate"],
@@ -277,7 +286,14 @@ def verify_g1_learning_curves(gate, root, *, expected_manifest_sha256=None, cali
                         "bootstrap_samples": samples, "bootstrap_seed": seed,
                         "uncertainty": "95% pointwise whole-story bootstrap accuracy intervals and paired baseline-to-final gain intervals; fixed pilot seed 1, not training-seed uncertainty."}
     if common_completion_protocol == NATURAL_COMPLETION_PROTOCOL:
-        results['reasoning_rl']['editor_editability'] = _g1_editor_measurements(gate, root, revised_native_predictions)
+        # An archived pass must never be presented as a current approval. Its
+        # missing editor measurements remain explicitly unassessed on inspection.
+        editor_gate = {**gate, 'status': 'pending'} if historical else gate
+        results['reasoning_rl']['editor_editability'] = _g1_editor_measurements(editor_gate, root, revised_native_predictions)
+        from .training.trace_health import summarize_trace_health_v2
+        results['reasoning_rl']['trace_health_lengths'] = summarize_trace_health_v2(
+            revised_native_predictions, completion_protocol=common_completion_protocol,
+            seed=seed, samples=samples)
     return results
 
 
@@ -323,6 +339,19 @@ def verify_g4_positive_control(gate, root, *, expected_test_layers=None):
 
 
 def assert_training_allowed(config_dict, gate_file, profile_report):
+    """Authorize only the current design; old evidence cannot launch new work."""
+    assert_current_design(config_dict)
+    return _training_evidence(config_dict, gate_file, profile_report)
+
+
+def inspect_historical_training_evidence(config_dict, gate_file, profile_report):
+    """Read-only legacy validation, deliberately not a launch-authorization API."""
+    review = _training_evidence(config_dict, gate_file, profile_report, historical=True)
+    return {"review_scope": "historical_inspection", "eligible_for_current_launch": False,
+            "gate_decision": "not_applied_by_evidence_inspection", "historical_review": review}
+
+
+def _training_evidence(config_dict, gate_file, profile_report, *, historical=False):
     stage = config_dict.get("stage", "pilot")
     if stage not in ("profile", "pilot", "confirmatory"):
         raise ValueError("Unknown experiment stage")
@@ -399,7 +428,8 @@ def assert_training_allowed(config_dict, gate_file, profile_report):
         for gate in GATES:
             verify_evidence(review["gates"][gate], path.parent)
         verify_g1_learning_curves(review["gates"]["G1"], path.parent,
-                                  expected_manifest_sha256=calibration["manifest_sha256"], calibration=calibration)
+                                  expected_manifest_sha256=calibration["manifest_sha256"], calibration=calibration,
+                                  historical=historical)
         settings = calibration.get("settings", {})
         _validate_frozen_g4_band(settings, plan=plan)
         test_layers = settings.get("g4_test_layers")

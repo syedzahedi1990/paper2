@@ -219,6 +219,7 @@ def test_cli_loads_local_tiny_checkpoint_and_runs_immediate_and_native_answers(b
     for format_name in ("immediate", "native_answer"):
         output = tmp_path / f"{format_name}.jsonl"
         assert main(["evaluate", "--model", str(model_dir), "--device", "cpu", "--reader", "base",
+                     "--completion-protocol", "natural_answer_cap_v2",
                      "--input", str(input_file), "--output", str(output), "--format", format_name]) == 0
         result, = read_jsonl(output)
         assert result["format"] == format_name

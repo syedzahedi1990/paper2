@@ -17,7 +17,7 @@ def _backend(args):
 
 
 def _model_args(parser):
-    parser.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
+    parser.add_argument("--model", default="mistralai/Mistral-Small-24B-Instruct-2501")
     parser.add_argument("--revision", help="Defaults to the proposal model's pinned immutable revision")
     parser.add_argument("--adapter")
     parser.add_argument("--device", default="auto")
@@ -42,17 +42,42 @@ def parser():
     shortcuts.add_argument("--output", required=True)
     audit = sub.add_parser("audit-tokenizer")
     audit.add_argument("--input", nargs="+", required=True)
-    audit.add_argument("--model", default="Qwen/Qwen2.5-3B-Instruct")
+    audit.add_argument("--model", default="mistralai/Mistral-Small-24B-Instruct-2501")
+    audit.add_argument("--revision", help="Defaults to the supported model's immutable pinned revision")
     audit.add_argument("--output", required=True)
     matrix = sub.add_parser("matrix")
     matrix.add_argument("--stage", choices=["pilot", "confirmatory"], required=True)
     matrix.add_argument("--output", required=True)
-    matrix.add_argument("--development-panel", action="store_true", help="Export the 24 preregistered pilot rate/schedule candidates without running them")
+    matrix.add_argument("--development-panel", action="store_true", help="Export the declared pilot candidates without running them")
+    matrix.add_argument("--design", choices=["amended_20261030", "legacy_proposal"], default="amended_20261030")
     gates = sub.add_parser("init-gates")
     gates.add_argument("--output", required=True)
     g1 = sub.add_parser("verify-g1", help="Summarize complete all-arm learning evidence without approving the gate")
     g1.add_argument("--review", required=True)
     g1.add_argument("--output", required=True)
+    g1.add_argument("--historical", action="store_true", help="Inspect historical evidence; cannot approve the current G1 gate")
+    health = sub.add_parser("trace-health", help="Create additive length diagnostics from saved predictions without generation")
+    health.add_argument("--input", required=True)
+    health.add_argument("--original-health", help="Verify frozen v1 summaries before deriving lengths")
+    health.add_argument("--output", required=True)
+    health.add_argument("--tokenizer", help="Optional tokenizer for separately labelled trace-token attribution")
+    health.add_argument("--revision", help="Immutable tokenizer revision; required with --tokenizer")
+    editability = sub.add_parser("g1-editability", help="Classify saved native checkpoint traces; never regenerate them")
+    edit_sub = editability.add_subparsers(dest="editability_command", required=True)
+    for name in ("prepare", "generate", "finalize", "resources"):
+        task = edit_sub.add_parser(name)
+        task.add_argument("--input", required=True, help="Preparation binding for prepare; prepared.json otherwise")
+        task.add_argument("--sha256", required=True, help="Exact SHA256 of --input")
+        task.add_argument("--output", required=True)
+        if name == "generate":
+            task.add_argument("--device", default="auto")
+            task.add_argument("--resume", action="store_true")
+            task.add_argument("--max-calls", type=int, help="Bound a measured editor profile, retaining finished contracts")
+        if name == "finalize":
+            task.add_argument("--generated", required=True)
+        if name == "resources":
+            task.add_argument("--journal")
+            task.add_argument("--hourly-gbp", type=float)
     freeze = sub.add_parser("freeze-calibration")
     for flag in ("review", "manifest", "settings", "evidence", "reviewer", "rationale"):
         freeze.add_argument("--" + flag, required=True)
@@ -73,9 +98,9 @@ def parser():
             run.add_argument("--reasoning", action="store_true", help="Native reasoning format; otherwise immediate")
         if command == "opentom-evaluate":
             run.add_argument("--opentom-protocol", choices=["official", "adapted"], default="official")
-        if command in ("evaluate", "traces"):
+        if command in ("evaluate", "traces", "components"):
             run.add_argument("--completion-protocol", choices=["legacy_forced_answer_v1", "natural_answer_cap_v2"],
-                             default="legacy_forced_answer_v1", help="Versioned native completion and scoring policy")
+                             required=True, help="Explicit versioned completion policy; legacy requires deliberate selection")
         if command == "evaluate":
             run.add_argument("--format", choices=["immediate", "native_answer", "native_reasoning"], default="immediate")
         if command in ("evaluate", "crossed"):
@@ -176,8 +201,14 @@ def main(argv=None):
     elif command == "audit-tokenizer":
         from transformers import AutoTokenizer
         from .data import audit_tokenizer_lengths
+        from .training.config import MODEL_REVISIONS
         rows = [row for path in args.input for row in read_jsonl(path)]
-        result = audit_tokenizer_lengths(rows, AutoTokenizer.from_pretrained(args.model))
+        revision = args.revision or MODEL_REVISIONS.get(args.model)
+        import re
+        if not revision or not re.fullmatch(r"[0-9a-f]{40}", revision):
+            raise ValueError("Tokenizer audit requires an immutable model revision")
+        result = audit_tokenizer_lengths(rows, AutoTokenizer.from_pretrained(args.model, revision=revision))
+        result['tokenizer'] = {'model': args.model, 'revision': revision}
         write_json(args.output, result)
         if not result["passed"]:
             raise ValueError("G2 tokenizer length matching failed; see audit output")
@@ -187,9 +218,12 @@ def main(argv=None):
             if args.stage != "pilot":
                 raise ValueError("Development selection uses pilot data and arms only")
             from .training.selection import export_development_panel
-            export_development_panel(args.output)
+            export_development_panel(args.output, design=args.design)
         else:
-            for config in experiment_matrix(args.stage):
+            from .training.selection import amended_experiment_matrix
+            configs = (amended_experiment_matrix(args.stage) if args.design == "amended_20261030"
+                       else experiment_matrix(args.stage))
+            for config in configs:
                 name = f"{config.arm}_{config.dataset}_seed{config.seed}.json"
                 write_json(Path(args.output) / name, config.to_dict())
     elif command == "init-gates":
@@ -207,10 +241,38 @@ def main(argv=None):
             raise ValueError("G1 evidence output must not overwrite the review")
         result = verify_g1_learning_curves(review["gates"]["G1"], Path(args.review).parent,
                                           expected_manifest_sha256=review["calibration"]["manifest_sha256"],
-                                          calibration=review["calibration"])
+                                          calibration=review["calibration"], historical=args.historical)
         write_json(args.output, {"schema_version": 1, "review_sha256": file_digest(args.review),
                                 "learning_curves": result,
                                 "note": "Evidence completeness only. No reviewer decision or numerical pass mark is inferred."})
+    elif command == "trace-health":
+        from .training.trace_health_reanalysis import reanalyze_trace_health
+        tokenizer = provenance = None
+        if bool(args.tokenizer) != bool(args.revision):
+            raise ValueError("Specify both --tokenizer and its immutable --revision, or neither")
+        if args.tokenizer:
+            import re
+            if not re.fullmatch(r"[0-9a-f]{40}", args.revision):
+                raise ValueError("Tokenizer revision must be an immutable commit")
+            from transformers import AutoTokenizer
+            tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, revision=args.revision)
+            provenance = {"model": args.tokenizer, "revision": args.revision}
+        reanalyze_trace_health(args.input, args.output, original_health_path=args.original_health,
+                               tokenizer=tokenizer, tokenizer_provenance=provenance)
+    elif command == "g1-editability":
+        from .training import g1_editability
+        if args.editability_command == "prepare":
+            print(json.dumps(g1_editability.prepare(args.input, args.sha256, args.output)))
+        elif args.editability_command == "generate":
+            print(json.dumps(g1_editability.generate(args.input, args.sha256, args.output, device=args.device,
+                                   resume=args.resume, max_calls=args.max_calls)))
+        elif args.editability_command == "finalize":
+            print(json.dumps(g1_editability.finalize(args.input, args.sha256, args.generated, args.output)))
+        else:
+            if Path(args.output).exists():
+                raise FileExistsError("Resource report output must be a new file")
+            write_json(args.output, g1_editability.resource_report(args.input, args.sha256,
+                       journal_path=args.journal, hourly_gbp=args.hourly_gbp))
     elif command in ("train", "profile"):
         from .training.config import load_config
         from .training.runner import run_training
@@ -284,7 +346,10 @@ def main(argv=None):
         import_opentom(args.input, args.output, args.source_url)
     elif command == "analyze":
         from . import analysis
+        from .protocols import completion_protocol
         rows = read_jsonl(args.input)
+        baseline = read_jsonl(args.baseline) if args.baseline else []
+        protocol = completion_protocol(rows + baseline) if args.kind != "opentom" else {}
         if args.kind in ("transfer", "crossed", "components") and not args.baseline:
             raise ValueError("This analysis requires --baseline")
         if args.kind == "accuracy":
@@ -305,7 +370,7 @@ def main(argv=None):
             result = summarize_opentom(rows)
         else:
             result = analysis.match_checkpoints(rows, expected_runs=_json(args.expected_runs) if args.expected_runs else None)
-        write_json(args.output, result)
+        write_json(args.output, {**result, **protocol})
     else:
         if args.adapter and args.training_seed is None:
             raise ValueError("Trained adapter inference requires --training-seed for valid confirmatory aggregation")
@@ -372,6 +437,7 @@ def main(argv=None):
             raise ValueError(command)
         if command != "regenerate-traces":
             results = [{**row, "training_seed": args.training_seed,
+                        **({"completion_protocol": args.completion_protocol} if command == "components" else {}),
                         **({"comparison_seed": args.comparison_seed} if command == "crossed" and args.comparison_seed is not None else {}),
                         **({"arm": args.arm} if args.arm else {})} for row in results]
         write_jsonl(args.output, results)

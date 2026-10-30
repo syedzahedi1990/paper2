@@ -28,6 +28,7 @@ def test_inference_normalizes_checkpoint_and_binds_unchanged_weights(tmp_path, m
     monkeypatch.setattr('paper2.cli._backend', backend)
     monkeypatch.setattr('paper2.evaluation.evaluate_native', evaluate)
     command = ['evaluate', '--input', str(source), '--output', str(output), '--reader', 'trained',
+               '--completion-protocol', 'natural_answer_cap_v2',
                '--adapter', 'checkpoint-50', '--training-seed', '1', '--arm', 'reasoning_rl']
     if change_weights:
         with pytest.raises(ValueError, match='changed during inference'):

@@ -323,6 +323,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     still requiring frozen G0 through the gate policy.
     """
     synthetic = synthetic_model is not None
+    execution_source = None
     config.validate(synthetic=synthetic)
     validate_rows(training_rows, config)
     budget = config.training_budget(len(training_rows), synthetic=synthetic)
@@ -331,6 +332,10 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
         if synthetic_tokenizer is None or sum(p.numel() for p in synthetic_model.parameters()) >= 1_000_000:
             raise ValueError('Synthetic bypass is restricted to supplied tiny models under 1M parameters')
     else:
+        from .source_identity import current_source_identity, assert_profile_source
+        execution_source = current_source_identity()
+        if profile_report is not None:
+            assert_profile_source(json.loads(Path(profile_report).read_text()), execution_source)
         from paper2.gates import assert_training_allowed
         review = assert_training_allowed(config.to_dict(), gate_file, profile_report)
         from paper2.io import file_digest
@@ -611,6 +616,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     training_device = trainer.model.device
     trainable = sum(p.numel() for p in trainer.model.parameters() if p.requires_grad)
     manifest = {'config': config.to_dict(), 'stack': versions, 'torch': torch.__version__,
+                'source_identity': execution_source,
                 'training_budget': budget, 'resource_plan': planned_resources,
                 'training_sha256': rows_digest(training_rows), 'training_examples': len(training_rows),
                 'trainable_parameters': trainable, 'model_revision_resolved': getattr(model.config, '_commit_hash', None),
@@ -663,6 +669,7 @@ def run_training(config: TrainingConfig, training_rows: list[dict[str, Any]], ou
     report = ledger.to_dict()
     if config.profile or config.stage == 'profile':
         profile = {'status': 'completed', 'config': config.to_dict(), 'training_budget': budget,
+                   'source_identity': execution_source,
                    'resource_plan': planned_resources, 'model': config.model,
                    'hardware': torch.cuda.get_device_name(training_device) if training_device.type == 'cuda' else 'CPU synthetic test',
                    'training_device': str(training_device),

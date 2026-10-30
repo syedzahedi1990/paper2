@@ -214,3 +214,148 @@ def summarize_trace_health(rows: Iterable[dict[str, Any]], *,
             'not_assessed': 'No native trace or fixed-editor result was supplied; this is not a favorable or unfavorable measurement.',
         },
     }
+
+
+def trace_token_attribution(trace: str, completion_text: str, completion_ids, *,
+                            tokenizer=None) -> dict[str, Any]:
+    """Describe a text boundary without inventing a sampled token boundary.
+
+    A tokenizer can encode ``.\n`` as one token, crossing the boundary between
+    a trace ending in a period and its natural answer header. In that case no
+    exact trace-token slice exists. Report the enclosing sampled-prefix counts
+    and a separately labelled re-encoding proxy; never substitute re-encoded
+    IDs for generated IDs. Prefix decoding can also be unstable around Unicode
+    byte sequences, so only prefixes agreeing with the complete decode bound
+    the interval.
+    """
+    if not isinstance(trace, str) or not isinstance(completion_text, str) or not completion_text.startswith(trace):
+        raise ValueError('Trace must be an exact text prefix of the completion')
+    if not isinstance(completion_ids, (list, tuple)) or any(
+            isinstance(token, bool) or not isinstance(token, int) or token < 0 for token in completion_ids):
+        raise ValueError('Sampled token IDs must be nonnegative integers')
+    result = {
+        'status': 'tokenizer_not_supplied', 'sampled_trace_tokens_exact': None,
+        'sampled_trace_token_ids': None, 'sampled_prefix_lower_bound': None,
+        'sampled_prefix_upper_bound': None, 'boundary_crosses_one_sampled_token': None,
+        'retokenized_trace_tokens_proxy': None,
+    }
+    if tokenizer is None:
+        return result
+    ids = list(completion_ids)
+    if tokenizer.decode(ids, skip_special_tokens=True) != completion_text:
+        raise ValueError('Completion text differs from decoding its sampled token IDs')
+    result['retokenized_trace_tokens_proxy'] = len(tokenizer.encode(trace, add_special_tokens=False))
+    prefixes = [tokenizer.decode(ids[:index], skip_special_tokens=True) for index in range(len(ids) + 1)]
+    exact = next((index for index, value in enumerate(prefixes) if value == trace), None)
+    if exact is not None:
+        result.update(status='exact_sampled_prefix', sampled_trace_tokens_exact=exact,
+                      sampled_trace_token_ids=ids[:exact], sampled_prefix_lower_bound=exact,
+                      sampled_prefix_upper_bound=exact, boundary_crosses_one_sampled_token=False)
+        return result
+    lower_candidates = [index for index, value in enumerate(prefixes)
+                        if completion_text.startswith(value) and len(value) < len(trace)]
+    lower = max(lower_candidates, default=None)
+    upper = next((index for index, value in enumerate(prefixes)
+                  if (lower is None or index > lower) and completion_text.startswith(value)
+                  and len(value) > len(trace)), None)
+    if lower is None or upper is None:
+        result['status'] = 'sampled_boundary_unresolved'
+        return result
+    result.update(status='text_boundary_inside_sampled_token_span',
+                  sampled_prefix_lower_bound=lower, sampled_prefix_upper_bound=upper,
+                  boundary_crosses_one_sampled_token=upper == lower + 1)
+    return result
+
+
+def _length_description(records, key, seed, samples):
+    values = [row[key] for row in records if row[key] is not None]
+    counts = Counter(values)
+    return {
+        'mean': _mean_interval(records, key, seed, samples),
+        'raw_distribution': [{'value': value, 'records': counts[value]} for value in sorted(counts)],
+        'raw_minimum': min(values) if values else None,
+        'raw_quartiles': np.quantile(values, [.25, .5, .75]).tolist() if values else None,
+        'raw_maximum': max(values) if values else None,
+        'distribution_definition': 'Raw record counts and quartiles describe the observed lengths; the mean and its interval average records within seed, then seeds within story, before whole-story resampling.',
+    }
+
+
+def summarize_trace_health_v2(rows: Iterable[dict[str, Any]], *,
+                              completion_protocol: str = NATURAL_COMPLETION_PROTOCOL,
+                              cap: int = 384, editor_statuses: Iterable[dict[str, Any]] | None = None,
+                              tokenizer=None, tokenizer_provenance: dict[str, Any] | None = None,
+                              seed: int = 2026, samples: int = 20_000) -> dict[str, Any]:
+    """Add descriptive lengths to, without changing, the frozen v1 analysis.
+
+    Use as a separate derived artifact for existing runs. ``legacy_summary``
+    remains the exact v1 calculation so historical receipt validation can keep
+    its original comparison. Completion lengths use actual sampled IDs without
+    a tokenizer. Trace characters and whitespace-separated words expose short
+    distinct traces that commonness/repetition alone cannot distinguish.
+    """
+    import json
+
+    rows = list(rows)
+    edits = list(editor_statuses) if editor_statuses is not None else None
+    legacy = summarize_trace_health(rows, completion_protocol=completion_protocol, cap=cap,
+                                    editor_statuses=edits, seed=seed, samples=samples)
+    if tokenizer is not None and not tokenizer_provenance:
+        raise ValueError('Token attribution requires explicit tokenizer provenance')
+    if tokenizer is None and tokenizer_provenance is not None:
+        raise ValueError('Tokenizer provenance supplied without a tokenizer')
+    provenance = json.loads(json.dumps(tokenizer_provenance, sort_keys=True, allow_nan=False))
+    grouped = defaultdict(list)
+    for row in rows:
+        if row.get('format') != 'native_reasoning':
+            continue
+        text = row.get('completion', row.get('completion_text'))
+        ids = row.get('completion_ids', row.get('completion_generated_ids'))
+        outcome = natural_completion_outcome(text, reasoning=True, completion_ids=ids,
+                                             trace_cap=cap, eos_token_id=row.get('eos_token_id'))
+        suffix = re.search(r'(?:^|\n)Answer:\s*[A-F]\.?' r'\s*$', text) if outcome['answer_complete'] else None
+        trace = text[:suffix.start()] if suffix is not None else text
+        attribution = trace_token_attribution(trace, text, ids, tokenizer=tokenizer)
+        grouped[_identity(row)[:len(PANEL_FIELDS)]].append({
+            'world_id': row['world_id'], 'id': row.get('id', row.get('record_id')),
+            'seed': _seed(row), 'checkpoint_id': row.get('checkpoint_id'),
+            'trace_sha256': sha256(trace.encode('utf-8')).hexdigest(),
+            'completion_sampled_tokens': len(ids), 'trace_characters': len(trace),
+            'trace_whitespace_words': len(trace.split()),
+            'trace_sampled_tokens_exact': attribution['sampled_trace_tokens_exact'],
+            'trace_sampled_token_lower_bound': attribution['sampled_prefix_lower_bound'],
+            'trace_sampled_token_upper_bound': attribution['sampled_prefix_upper_bound'],
+            'trace_retokenized_tokens_proxy': attribution['retokenized_trace_tokens_proxy'],
+            'token_attribution': attribution,
+        })
+    panels = []
+    for old in legacy['panels']:
+        identity = tuple(old['identity'][key] for key in PANEL_FIELDS)
+        records = grouped[identity]
+        panels.append({
+            'identity': old['identity'], 'checkpoint_bindings': old['checkpoint_bindings'],
+            'native_records': len(records), 'stories': old['stories'],
+            'training_seeds': old['training_seeds'],
+            'lengths': {key: _length_description(records, key, seed, samples) for key in (
+                'completion_sampled_tokens', 'trace_characters', 'trace_whitespace_words',
+                'trace_sampled_tokens_exact', 'trace_sampled_token_lower_bound',
+                'trace_sampled_token_upper_bound', 'trace_retokenized_tokens_proxy')},
+            'token_attribution_status_counts': dict(sorted(Counter(
+                row['token_attribution']['status'] for row in records).items())),
+            'records': records,
+        })
+    return {
+        'schema_version': 2, 'analysis': 'trace_health_lengths_v2', 'status': legacy['status'],
+        'completion_protocol': completion_protocol, 'token_budget': cap,
+        'bootstrap_samples': samples, 'bootstrap_seed': seed, 'uncertainty': UNCERTAINTY,
+        'tokenizer_provenance': provenance, 'legacy_summary': legacy, 'panels': panels,
+        'definitions': {
+            'completion_sampled_tokens': 'Count of the saved unpadded sampled IDs, including the natural answer header, answer and EOS when present. Never re-tokenized.',
+            'trace_text': 'Only a complete terminal natural Answer: X (optional adjacent period) and its preceding newline are removed. Malformed or incomplete answer headers remain observed trace text.',
+            'trace_characters': 'Number of Python Unicode code points in the trace text.',
+            'trace_whitespace_words': 'Number of nonempty whitespace-separated text segments; a descriptive length, not a linguistic word count or a quality threshold.',
+            'trace_sampled_tokens_exact': 'Earliest sampled-token prefix decoding exactly to the trace. Missing when the trace/answer text boundary crosses a token or no tokenizer is supplied.',
+            'sampled_token_bounds': 'Counts of actual decoded sampled-token prefixes bracketing the trace text boundary; these are attribution bounds, not statistical confidence intervals. They are not an exact allocation of a boundary-crossing token.',
+            'trace_retokenized_tokens_proxy': 'Length obtained by separately encoding trace text without special tokens. A labelled proxy that may differ from sampled tokenization; never replaces sampled IDs, budgets or rewards.',
+            'acceptance_rule': 'None. All lengths, distributions and intervals are descriptive; no minimum trace length or repetition/editability threshold is imposed.',
+        },
+    }
